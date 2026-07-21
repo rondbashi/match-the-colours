@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Match the Colours</title>
+<meta name="description" content="Find every pair of identical colours as fast as you can.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="game.js" defer></script>
+</head>
+<body>
+<div id="app">
+
+  <div id="titleScreen">
+    <div class="top-controls">
+      <div class="dropdown" id="hardModeDropdown">
+        <button id="hardModeToggle" title="Hard mode settings" aria-expanded="false" aria-haspopup="true">
+          <svg class="spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <span class="st-label" id="hardModeLabel">Hard mode</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div id="hardModePanel">
+          <label class="opt-row">
+            <input type="checkbox" id="optCountTimer">
+            5 seconds timer
+          </label>
+          <label class="opt-row">
+            <input type="checkbox" id="optCountTimer10">
+            10 seconds timer
+          </label>
+          <label class="opt-row">
+            <input type="checkbox" id="optLongList">
+            3x Longer list
+          </label>
+        </div>
+      </div>
+      <button id="soundToggle" title="Toggle sound">
+        <svg id="soundIconOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 6a9 9 0 0 1 0 12"></path></svg>
+        <svg id="soundIconOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon><line x1="17" y1="8" x2="23" y2="14"></line><line x1="23" y1="8" x2="17" y2="14"></line></svg>
+        <span class="st-label" id="soundLabel">On</span>
+      </button>
+    </div>
+
+    <div class="brand">
+      <svg id="logo" viewBox="0 0 460 46" xmlns="http://www.w3.org/2000/svg">
+        <text x="50%" y="34" text-anchor="middle" font-family="'Sora',sans-serif" font-weight="700" font-size="34" fill="#2F3E46" letter-spacing="0.2">Match the <tspan fill="#E14434">Colours</tspan></text>
+      </svg>
+      <p class="tagline">Find the two swatches that share the exact same colour.</p>
+    </div>
+
+    <div class="start-row">
+      <button id="startBtn">Start</button>
+      <!-- DEV BUTTON START (delete this button to strip dev mode) -->
+      <!--<button id="devStartBtn">Start as dev (1 pair)</button>-->
+      <!-- DEV BUTTON END -->
+    </div>
+  </div>
+
+  <div id="gameScreen">
+    <div id="hardTimer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>
+      <span id="hardTimerValue">5</span>
+    </div>
+    <button id="backBtn" class="home-btn" title="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>
+    </button>
+    <div id="board"></div>
+  </div>
+
+  <div id="failOverlay">
+    <button id="failHomeBtn" class="home-btn" title="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>
+    </button>
+    <div class="overlay-badge fail-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </div>
+    <h2>Time's up</h2>
+    <div class="subtitle" id="failMatchedCount">0 of 0 matched</div>
+  </div>
+
+  <div id="overlay">
+    <div class="overlay-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </div>
+    <h2>All matched</h2>
+    <div class="subtitle">Your time</div>
+    <div class="time" id="finalTime">0.00s</div>
+    <div id="leaderboard">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"></path><path d="M12 17v4"></path><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"></path><path d="M7 5H4a2 2 0 0 0 0 4h1"></path><path d="M17 5h3a2 2 0 0 1 0 4h-1"></path></svg>
+        Top 10 times
+      </h3>
+      <ol id="scoreList"></ol>
+    </div>
+    <div class="icon-row">
+      <a class="icon-btn" id="supportBtn" href="https://ko-fi.com/neonlemon123" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v6a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="2" x2="6" y2="4"></line><line x1="10" y1="2" x2="10" y2="4"></line><line x1="14" y1="2" x2="14" y2="4"></line></svg>
+        <span class="tooltip">Support developer</span>
+      </a>
+    </div>
+  </div>
+</div>
+</body>
+</html>
