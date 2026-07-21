@@ -13,6 +13,7 @@
   --c-sand:#F2C48D;
   --c-orange:#FF9666;
   --c-pink:#FFB4B4;
+  --c-pink-pale:#FFDCDC;
   --c-berry:#B8336A;
   --c-red:#E14434;
   --c-red-deep:#B22E22;
@@ -37,8 +38,8 @@
   --border-strong:var(--c-taupe);
   --primary:var(--c-red);
   --primary-dark:var(--c-red-deep);
-  --accent:var(--c-teal);
-  --warn:var(--c-orange);
+  --accent:var(--c-blue);
+  --warn:var(--c-pink);
   --danger:var(--c-red-deep);
 
   --radius-sm:6px;
@@ -117,9 +118,9 @@ html,body{
 }
 #hardModeToggle svg.spark{ width:15px; height:15px; display:block; flex-shrink:0; }
 #hardModeToggle svg.chevron{ width:11px; height:11px; display:block; flex-shrink:0; transition:transform 0.12s; }
-#hardModeToggle:hover{ background:var(--c-yellow); }
+#hardModeToggle:hover{ background:var(--c-pink-pale); }
 #hardModeToggle.active{
-  background:var(--c-orange); border-color:var(--ink); color:var(--ink);
+  background:var(--c-pink); border-color:var(--ink); color:var(--ink);
 }
 #hardModeToggle[aria-expanded="true"] svg.chevron{ transform:rotate(180deg); }
 
@@ -262,7 +263,7 @@ html,body{
   display:none;
   align-items:center; gap:7px;
   padding:7px 14px 7px 11px;
-  background:var(--c-orange);
+  background:var(--c-pink);
   border:2px solid var(--ink);
   border-radius:999px;
   color:var(--ink);
@@ -287,7 +288,7 @@ html,body{
 #overlay.show, #failOverlay.show{ display:flex; }
 .overlay-badge{
   width:52px; height:52px; border-radius:50%;
-  background:var(--c-teal);
+  background:var(--c-blue);
   border:2px solid var(--ink);
   display:flex; align-items:center; justify-content:center;
   margin-bottom:14px;
@@ -305,7 +306,7 @@ html,body{
 
 #overlay .time{
   font-family:var(--font-display);
-  font-size:38px; font-weight:800; color:var(--c-berry); margin:6px 0 16px 0;
+  font-size:38px; font-weight:800; color:var(--c-blue-deep); margin:6px 0 16px 0;
   letter-spacing:-0.5px;
 }
 #leaderboard{
@@ -351,7 +352,7 @@ html,body{
   text-decoration:none;
 }
 .icon-btn svg{ width:20px; height:20px; }
-.icon-btn:hover{ background:var(--c-yellow); }
+.icon-btn:hover{ background:var(--c-pink-pale); }
 .icon-btn .tooltip{
   position:absolute; bottom:120%; left:50%; transform:translateX(-50%);
   background:var(--ink); color:#FFFFFF; font-size:11px;
