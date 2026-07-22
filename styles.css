@@ -227,6 +227,20 @@ html,body{
 .swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
 
+/* Floating action shown over the board when the selection is a bonded piece. */
+#splitBtn{
+  position:absolute; z-index:15;
+  display:none;
+  transform:translateX(-50%);
+  padding:5px 14px;
+  border:none; border-radius:999px;
+  background:var(--ink); color:#FFFFFF;
+  font-family:var(--font-body); font-weight:600; font-size:12px;
+  letter-spacing:0.2px;
+  cursor:pointer;
+}
+#splitBtn:hover{ background:var(--c-red); }
+
 .particle{
   position:absolute;
   width:6px; height:6px;

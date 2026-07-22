@@ -17,7 +17,8 @@
   // one connected group, so long list asks for 6-block chains, not pairs.
   const BASE_PAIR_COUNT = 20;
   const LONG_LIST_MULTIPLIER = 3;
-  const DEV_PAIR_COUNT = 3;            // 6 tiles — smallest board that still slides
+  const TEST_PAIR_COUNT = 2;           // shift+Start: 4 blocks, for testing
+  const DEV_PAIR_COUNT = 3;
   const SET_SIZE = 2;                  // tiles added per pair
   const MAX_SCORES = 10;
 
@@ -139,6 +140,7 @@
       },
       click() { if (enabled) tone(720, 0, 0.07, 'square', 0.05); },
       move() { if (enabled) tone(520, 0, 0.09, 'square', 0.045); },
+      split() { if (enabled) { tone(600, 0, 0.07, 'square', 0.045); tone(420, 0.06, 0.09, 'square', 0.045); } },
       match() { if (enabled) chord([660, 880, 1100, 1320], 0.06, 0.32, 'triangle', 0.045); },
       finish() { if (enabled) chord([523.25, 659.25, 783.99, 1046.5], 0.09, 0.4, 'triangle', 0.05); },
       tick() { if (enabled) tone(880, 0, 0.08, 'square', 0.04); },
@@ -388,11 +390,19 @@
   /* =========================================================================
    * Round state
    *
-   * The board is a full cols x rows grid (tile count always factorizes — it is
-   * even) and stays full for the whole round: completed colours are never
-   * removed, they remain on the board as fused pieces that block the rows and
-   * columns they cross. All movement is a cyclic rotation of one row or
-   * column, so the grid stays rectangular throughout.
+   * The board is a full cols x rows grid (tile count always factorizes — it
+   * is even) and stays full for the whole round; blocks are never removed.
+   *
+   * Connections are explicit bonds rather than derived adjacency: a bond
+   * forms the moment a move brings two same-colour blocks newly side by
+   * side, and only the split button breaks it. This distinction is what lets
+   * a freshly split pair sit adjacent without instantly re-fusing.
+   *
+   * All movement is a band rotation: a lone block rotates its own row or
+   * column, and a two-block piece may also rotate the two rows (or columns)
+   * it spans together, carrying the piece sideways. A move is legal only if
+   * no bond crosses the band's edge, which is also what makes bonded pieces
+   * blockers for every line they cross perpendicularly.
    * ======================================================================= */
 
   const round = {
@@ -401,7 +411,7 @@
     rows: 0,
     grid: [],            // grid[r][c] -> block
     blocks: [],
-    selected: null,      // block whose row/column is currently highlighted
+    selected: null,      // block whose destinations are currently highlighted
     hinted: [],          // blocks carrying the .hint outline
     colourTotal: {},     // colorId -> copies on this board (the join target)
     done: new Set(),     // colorIds currently joined into one group
@@ -457,11 +467,11 @@
   }
 
   /**
-   * Same-colour neighbours fuse (and a complete colour clears) the moment they
-   * touch, so the opening board must not hand any connection out for free.
-   * Hill-climb on random swaps until no two same-colour tiles are orthogonal
-   * neighbours; the cap is a safety net, in practice it converges in a few
-   * hundred swaps even on the 3x board.
+   * Same-colour neighbours bond the moment they touch, so the opening board
+   * must not hand any connection out for free. Hill-climb on random swaps
+   * until no two same-colour tiles are orthogonal neighbours; the cap is a
+   * safety net, in practice it converges in a few hundred swaps even on the
+   * 3x board.
    */
   function arrangeTiles(tiles, cols) {
     let conflicts = countAdjacencyConflicts(tiles, cols);
@@ -485,65 +495,128 @@
     return (r >= 0 && r < round.rows && c >= 0 && c < round.cols) ? round.grid[r][c] : null;
   }
 
-  /** Fused = same colour and orthogonally adjacent (no wrap: the seam between
-   *  the two board edges is not a connection, even though moves wrap). */
-  function fusedWith(block, r, c) {
+  function bondedAt(block, r, c) {
     const other = blockAt(r, c);
-    return !!other && other.colorId === block.colorId;
+    return !!other && block.bonds.has(other);
   }
 
-  /** The connected group the block currently belongs to, via flood fill.
-   *  Connectivity is always derived from the grid rather than stored, so
-   *  groups split and re-fuse naturally as rows slide through each other. */
+  /** The piece the block belongs to: its connected component in the bond
+   *  graph. Bonds only ever link same-colour neighbours, so a piece is
+   *  always monochrome. */
   function groupOf(block) {
     const group = [block];
     const seen = new Set([block]);
     for (let i = 0; i < group.length; i++) {
-      const b = group[i];
-      [[b.r - 1, b.c], [b.r + 1, b.c], [b.r, b.c - 1], [b.r, b.c + 1]].forEach(([r, c]) => {
-        const n = blockAt(r, c);
-        if (n && n.colorId === b.colorId && !seen.has(n)) {
-          seen.add(n);
-          group.push(n);
+      group[i].bonds.forEach(p => {
+        if (!seen.has(p)) {
+          seen.add(p);
+          group.push(p);
         }
       });
     }
     return group;
   }
 
-  /**
-   * A line may rotate only if doing so tears no fused piece: any vertical
-   * fuse crossing a row pins that row, any horizontal fuse crossing a column
-   * pins that column. One rule yields both of the game's movement laws — a
-   * fused piece can move only along its own axis (its blocks fuse across the
-   * other one), and it stands as a blocker for every line it crosses
-   * perpendicularly.
-   */
-  function canRotateRow(r) {
-    for (let c = 0; c < round.cols; c++) {
-      const b = round.grid[r][c];
-      if (b && (fusedWith(b, r - 1, c) || fusedWith(b, r + 1, c))) return false;
+  /* =========================================================================
+   * Movement legality
+   *
+   * A horizontal move rotates every row the moving piece spans; vertical
+   * moves mirror this with columns. The band is legal when:
+   *   - the piece is a single block or a two-block piece (bigger pieces can
+   *     only move if they fit inside one line), and
+   *   - no bond anywhere in the band crosses the band's edge — a torn bond
+   *     is never allowed, which is what turns every piece into a blocker
+   *     for the perpendicular lines it crosses.
+   * On top of that, a specific destination is rejected if it would park a
+   * bonded pair straddling the wrap seam, where the pair would no longer be
+   * truly adjacent.
+   * ======================================================================= */
+
+  function movableRows(group) {
+    const rows = [...new Set(group.map(b => b.r))];
+    if (rows.length > 1 && group.length !== 2) return null;
+    const inBand = new Set(rows);
+    for (const r of rows) {
+      for (let c = 0; c < round.cols; c++) {
+        for (const p of round.grid[r][c].bonds) {
+          if (!inBand.has(p.r)) return null;
+        }
+      }
     }
-    return true;
+    return rows;
   }
 
-  function canRotateColumn(c) {
-    for (let r = 0; r < round.rows; r++) {
-      const b = round.grid[r][c];
-      if (b && (fusedWith(b, r, c - 1) || fusedWith(b, r, c + 1))) return false;
+  function movableColumns(group) {
+    const cols = [...new Set(group.map(b => b.c))];
+    if (cols.length > 1 && group.length !== 2) return null;
+    const inBand = new Set(cols);
+    for (const c of cols) {
+      for (let r = 0; r < round.rows; r++) {
+        for (const p of round.grid[r][c].bonds) {
+          if (!inBand.has(p.c)) return null;
+        }
+      }
     }
-    return true;
+    return cols;
+  }
+
+  function rowShiftStraddlesSeam(rows, delta) {
+    const cols = round.cols;
+    if (cols <= 2) return false;       // on a 2-wide board every cell pair stays adjacent
+    for (const r of rows) {
+      for (let c = 0; c < cols - 1; c++) {
+        if (round.grid[r][c].bonds.has(round.grid[r][c + 1]) &&
+            (((c + 1 + delta) % cols) + cols) % cols === 0) return true;
+      }
+    }
+    return false;
+  }
+
+  function columnShiftStraddlesSeam(cols, delta) {
+    const rows = round.rows;
+    if (rows <= 2) return false;
+    for (const c of cols) {
+      for (let r = 0; r < rows - 1; r++) {
+        if (round.grid[r][c].bonds.has(round.grid[r + 1][c]) &&
+            (((r + 1 + delta) % rows) + rows) % rows === 0) return true;
+      }
+    }
+    return false;
   }
 
   /* =========================================================================
    * Selection & movement
    * ======================================================================= */
 
+  const splitBtn = document.createElement('button');
+  splitBtn.id = 'splitBtn';
+  splitBtn.type = 'button';
+  splitBtn.textContent = 'Split';
+  splitBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    splitSelected();
+  });
+
+  function hideSplitButton() {
+    splitBtn.style.display = 'none';
+  }
+
+  /** Float the split button just above the block (below it for the top row). */
+  function showSplitButton(block) {
+    const step = round.cellSize + GRID_GAP;
+    const x = round.originX + block.c * step + round.cellSize / 2;
+    const above = round.originY + block.r * step - 34;
+    splitBtn.style.display = 'block';
+    splitBtn.style.left = Math.round(x) + 'px';
+    splitBtn.style.top = Math.round(above >= 0 ? above : above + step + 34 + 8) + 'px';
+  }
+
   function clearSelection() {
     if (round.selected) round.selected.node.classList.remove('selected');
     round.selected = null;
     round.hinted.forEach(b => b.node.classList.remove('hint'));
     round.hinted = [];
+    hideSplitButton();
   }
 
   function select(block) {
@@ -551,15 +624,34 @@
     round.selected = block;
     block.node.classList.add('selected');
 
-    const rowOk = canRotateRow(block.r);
-    const colOk = canRotateColumn(block.c);
+    const group = groupOf(block);
+    const rowBand = movableRows(group);
+    const colBand = movableColumns(group);
+
     round.blocks.forEach(b => {
       if (b === block) return;
-      if ((rowOk && b.r === block.r) || (colOk && b.c === block.c)) {
+      const viaRow = rowBand && b.r === block.r && !rowShiftStraddlesSeam(rowBand, b.c - block.c);
+      const viaCol = colBand && b.c === block.c && !columnShiftStraddlesSeam(colBand, b.r - block.r);
+      if (viaRow || viaCol) {
         b.node.classList.add('hint');
         round.hinted.push(b);
       }
     });
+
+    if (group.length > 1) showSplitButton(block);
+  }
+
+  /** Break every bond in the selected piece; the blocks stay where they are
+   *  but move independently again. Adjacent-but-split same-colour blocks do
+   *  not re-bond until a move separates and rejoins them. */
+  function splitSelected() {
+    if (!round.active || !round.selected) return;
+    const block = round.selected;
+    groupOf(block).forEach(b => b.bonds.clear());
+    sound.split();
+    round.done = completedColours();  // the split colour is no longer joined
+    positionAll();
+    select(block);                     // re-derive hints for the lone block
   }
 
   function onBlockClick(block, event) {
@@ -581,12 +673,23 @@
     select(block);                    // otherwise the tap moves the selection
   }
 
-  /** Rotate the shared row/column so `sel` lands exactly on `dest`'s cell;
-   *  everything in between shifts one step and the edge wraps around. */
+  /** Rotate the band so `sel` lands exactly on `dest`'s cell; everything in
+   *  the band shifts one step and the edge wraps around. */
   function moveTo(sel, dest) {
-    if (dest.r === sel.r) rotateRow(sel.r, dest.c - sel.c);
-    else rotateColumn(sel.c, dest.r - sel.r);
+    const group = groupOf(sel);
+    const before = sameColourAdjacencies();
 
+    if (dest.r === sel.r) {
+      const band = movableRows(group);
+      if (!band) { clearSelection(); return; }
+      band.forEach(r => rotateRow(r, dest.c - sel.c));
+    } else {
+      const band = movableColumns(group);
+      if (!band) { clearSelection(); return; }
+      band.forEach(c => rotateColumn(c, dest.r - sel.r));
+    }
+
+    bondNewAdjacencies(before);
     clearSelection();
     sound.move();
     refreshBoard();
@@ -599,7 +702,7 @@
     for (let c = 0; c < cols; c++) {
       const target = ((c + delta) % cols + cols) % cols;
       next[target] = row[c];
-      if (row[c]) row[c].c = target;
+      row[c].c = target;
     }
     round.grid[r] = next;
   }
@@ -610,7 +713,47 @@
     for (let r = 0; r < rows; r++) {
       const target = ((r + delta) % rows + rows) % rows;
       round.grid[target][c] = column[r];
-      if (column[r]) column[r].r = target;
+      column[r].r = target;
+    }
+  }
+
+  /* =========================================================================
+   * Bonds
+   * ======================================================================= */
+
+  function pairKey(a, b) {
+    return a.id < b.id ? a.id + ':' + b.id : b.id + ':' + a.id;
+  }
+
+  /** Keys of every same-colour orthogonally adjacent pair, bonded or not. */
+  function sameColourAdjacencies() {
+    const keys = new Set();
+    for (let r = 0; r < round.rows; r++) {
+      for (let c = 0; c < round.cols; c++) {
+        const b = round.grid[r][c];
+        const right = c + 1 < round.cols ? round.grid[r][c + 1] : null;
+        const down = r + 1 < round.rows ? round.grid[r + 1][c] : null;
+        if (right && right.colorId === b.colorId) keys.add(pairKey(b, right));
+        if (down && down.colorId === b.colorId) keys.add(pairKey(b, down));
+      }
+    }
+    return keys;
+  }
+
+  /** Bond exactly the pairs the move newly created. Pairs that were already
+   *  adjacent before it (like a freshly split piece) stay unbonded. */
+  function bondNewAdjacencies(before) {
+    for (let r = 0; r < round.rows; r++) {
+      for (let c = 0; c < round.cols; c++) {
+        const b = round.grid[r][c];
+        [c + 1 < round.cols ? round.grid[r][c + 1] : null,
+         r + 1 < round.rows ? round.grid[r + 1][c] : null].forEach(n => {
+          if (n && n.colorId === b.colorId && !before.has(pairKey(b, n))) {
+            b.bonds.add(n);
+            n.bonds.add(b);
+          }
+        });
+      }
     }
   }
 
@@ -618,9 +761,10 @@
    * Board rendering
    *
    * Cell positions are a pure function of (r, c) and the measured cell size.
-   * Fused neighbours are drawn as one shape: a block extends over the gutter
-   * toward a fused right/down neighbour and squares off the shared corners,
-   * so a chain reads as a single long piece.
+   * Bonded neighbours are drawn as one shape: a block extends over the
+   * gutter toward a bonded right/down neighbour and squares off the shared
+   * corners, so a piece reads as a single connected shape while a split pair
+   * shows the gutter between its rounded squares again.
    * ======================================================================= */
 
   const SWATCH_RADIUS = 6;             // must match --radius-sm in styles.css
@@ -648,10 +792,10 @@
     const step = size + GRID_GAP;
 
     round.blocks.forEach(b => {
-      const up = fusedWith(b, b.r - 1, b.c);
-      const down = fusedWith(b, b.r + 1, b.c);
-      const left = fusedWith(b, b.r, b.c - 1);
-      const right = fusedWith(b, b.r, b.c + 1);
+      const up = bondedAt(b, b.r - 1, b.c);
+      const down = bondedAt(b, b.r + 1, b.c);
+      const left = bondedAt(b, b.r, b.c - 1);
+      const right = bondedAt(b, b.r, b.c + 1);
 
       b.node.style.left = Math.round(round.originX + b.c * step) + 'px';
       b.node.style.top = Math.round(round.originY + b.r * step) + 'px';
@@ -685,6 +829,7 @@
       relayoutQueued = false;
       layoutMetrics();
       positionAll();
+      if (round.selected) showSplitButton(round.selected);
     });
   }
   window.addEventListener('resize', queueRelayout);
@@ -697,8 +842,8 @@
   function startRound(pairCount) {
     el.overlay.classList.remove('show');
     el.failOverlay.classList.remove('show');
-    el.board.innerHTML = '';
     clearSelection();
+    el.board.innerHTML = '';
 
     const tiles = buildTiles(pairCount);
     const reserve = topControlsReserve();
@@ -731,7 +876,15 @@
         node.type = 'button';
         node.className = 'swatch';
         node.style.background = tile.hex;
-        const block = { r, c, colorId: tile.id, hex: tile.hex, particle: darken(tile.hex, 0.6), node };
+        const block = {
+          id: r * dims.cols + c,
+          r, c,
+          colorId: tile.id,
+          hex: tile.hex,
+          particle: darken(tile.hex, 0.6),
+          bonds: new Set(),
+          node
+        };
         node.addEventListener('click', (e) => onBlockClick(block, e));
         row.push(block);
         round.blocks.push(block);
@@ -744,12 +897,13 @@
     layoutMetrics();
     positionAll();                     // styles set before insertion: no slide-in
     round.blocks.forEach(b => el.board.appendChild(b.node));
+    el.board.appendChild(splitBtn);    // board was wiped, put the button back
 
     round.startedAt = Date.now();
     countdown.restart(failRound);
   }
 
-  /** Every colour whose copies currently form one connected group. */
+  /** Every colour whose copies currently form one bonded piece. */
   function completedColours() {
     const done = new Set();
     const seen = new Set();
@@ -762,10 +916,10 @@
     return done;
   }
 
-  /** After every move: redraw fuses, then celebrate any colour whose every
-   *  copy has just joined into one group. Completed colours stay on the board
-   *  as fused blockers — and a slide across the wrap seam can even split one
-   *  again, so completion is re-derived rather than latched. */
+  /** After every move: redraw bonds, then celebrate any colour whose every
+   *  copy has just joined into one piece. The piece stays on the board as a
+   *  blocker — and the split button can break it again, so completion is
+   *  re-derived rather than latched. */
   function refreshBoard() {
     positionAll();
 
@@ -790,6 +944,7 @@
 
   function finishRound() {
     round.active = false;
+    clearSelection();
     const elapsed = (Date.now() - round.startedAt) / 1000;
     saveScore(elapsed);
     sound.finish();
@@ -833,8 +988,10 @@
     el.titleScreen.style.display = 'flex';
   }
 
-  el.startBtn.addEventListener('click', () => {
-    showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
+  // Shift+Start deals a 4-block board for quick rule testing.
+  el.startBtn.addEventListener('click', (e) => {
+    if (e.shiftKey) showGame(TEST_PAIR_COUNT);
+    else showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
   });
 
   // DEV BUTTON START (remove this block + the #devStartBtn element to strip dev mode)
