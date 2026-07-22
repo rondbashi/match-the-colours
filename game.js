@@ -13,8 +13,8 @@
   // A standard round is the whole palette, one pair each. The long-list option
   // cannot add new colours (the palette is fixed), so it adds pairs per colour
   // instead — 3x the tiles. With the sliding mechanic that also changes the
-  // goal per colour: a colour clears only when ALL of its copies are joined
-  // into one connected group, so long list asks for 6-block chains, not pairs.
+  // goal per colour: a colour is done when ALL of its copies are joined into
+  // one connected group, so long list asks for 6-block chains, not pairs.
   const BASE_PAIR_COUNT = 20;
   const LONG_LIST_MULTIPLIER = 3;
   const DEV_PAIR_COUNT = 3;            // 6 tiles — smallest board that still slides
@@ -330,7 +330,8 @@
       }
     },
 
-    // Restarted after every cleared colour, so the clock is per-clear.
+    // Restarted after every newly completed colour, so the clock is
+    // per-connection rather than for the whole round.
     restart(onExpire) {
       if (!this.active) return;
       this.stop();
@@ -388,21 +389,22 @@
    * Round state
    *
    * The board is a full cols x rows grid (tile count always factorizes — it is
-   * even) where every cell holds a block or, after a colour clears, a gap.
-   * All movement is a cyclic rotation of one row or column, so the grid stays
-   * rectangular for the whole round and gaps simply rotate along with blocks.
+   * even) and stays full for the whole round: completed colours are never
+   * removed, they remain on the board as fused pieces that block the rows and
+   * columns they cross. All movement is a cyclic rotation of one row or
+   * column, so the grid stays rectangular throughout.
    * ======================================================================= */
 
   const round = {
     active: false,
     cols: 0,
     rows: 0,
-    grid: [],            // grid[r][c] -> block | null
-    blocks: [],          // live blocks (cleared ones are removed)
+    grid: [],            // grid[r][c] -> block
+    blocks: [],
     selected: null,      // block whose row/column is currently highlighted
     hinted: [],          // blocks carrying the .hint outline
-    colourTotal: {},     // colorId -> copies on this board (the clear target)
-    cleared: 0,
+    colourTotal: {},     // colorId -> copies on this board (the join target)
+    done: new Set(),     // colorIds currently joined into one group
     totalColours: 0,
     cellSize: 0,
     originX: 0,
@@ -510,21 +512,27 @@
   }
 
   /**
-   * A lone block moves along its row or its column. A fused group is locked
-   * to its longer bounding-box axis — wide groups slide horizontally, tall
-   * ones vertically, and a square-bounded group keeps both.
+   * A line may rotate only if doing so tears no fused piece: any vertical
+   * fuse crossing a row pins that row, any horizontal fuse crossing a column
+   * pins that column. One rule yields both of the game's movement laws — a
+   * fused piece can move only along its own axis (its blocks fuse across the
+   * other one), and it stands as a blocker for every line it crosses
+   * perpendicularly.
    */
-  function allowedAxes(block) {
-    const group = groupOf(block);
-    if (group.length === 1) return { row: true, col: true };
-    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
-    group.forEach(b => {
-      minR = Math.min(minR, b.r); maxR = Math.max(maxR, b.r);
-      minC = Math.min(minC, b.c); maxC = Math.max(maxC, b.c);
-    });
-    const w = maxC - minC + 1;
-    const h = maxR - minR + 1;
-    return { row: w >= h, col: h >= w };
+  function canRotateRow(r) {
+    for (let c = 0; c < round.cols; c++) {
+      const b = round.grid[r][c];
+      if (b && (fusedWith(b, r - 1, c) || fusedWith(b, r + 1, c))) return false;
+    }
+    return true;
+  }
+
+  function canRotateColumn(c) {
+    for (let r = 0; r < round.rows; r++) {
+      const b = round.grid[r][c];
+      if (b && (fusedWith(b, r, c - 1) || fusedWith(b, r, c + 1))) return false;
+    }
+    return true;
   }
 
   /* =========================================================================
@@ -543,10 +551,11 @@
     round.selected = block;
     block.node.classList.add('selected');
 
-    const axes = allowedAxes(block);
+    const rowOk = canRotateRow(block.r);
+    const colOk = canRotateColumn(block.c);
     round.blocks.forEach(b => {
       if (b === block) return;
-      if ((axes.row && b.r === block.r) || (axes.col && b.c === block.c)) {
+      if ((rowOk && b.r === block.r) || (colOk && b.c === block.c)) {
         b.node.classList.add('hint');
         round.hinted.push(b);
       }
@@ -707,7 +716,7 @@
     round.grid = [];
     round.blocks = [];
     round.colourTotal = {};
-    round.cleared = 0;
+    round.done = new Set();
 
     tiles.forEach(tile => {
       round.colourTotal[tile.id] = (round.colourTotal[tile.id] || 0) + 1;
@@ -740,36 +749,38 @@
     countdown.restart(failRound);
   }
 
-  /** After every move: redraw fuses, then clear any colour whose every copy
-   *  is now in one connected group. */
-  function refreshBoard() {
-    positionAll();
-
+  /** Every colour whose copies currently form one connected group. */
+  function completedColours() {
+    const done = new Set();
     const seen = new Set();
-    const complete = [];
     round.blocks.forEach(b => {
       if (seen.has(b)) return;
       const group = groupOf(b);
       group.forEach(m => seen.add(m));
-      if (group.length === round.colourTotal[b.colorId]) complete.push(group);
+      if (group.length === round.colourTotal[b.colorId]) done.add(b.colorId);
     });
+    return done;
+  }
 
-    if (!complete.length) return;
+  /** After every move: redraw fuses, then celebrate any colour whose every
+   *  copy has just joined into one group. Completed colours stay on the board
+   *  as fused blockers — and a slide across the wrap seam can even split one
+   *  again, so completion is re-derived rather than latched. */
+  function refreshBoard() {
+    positionAll();
 
-    complete.forEach(group => {
-      group.forEach(b => {
-        burstParticles(b.node, b.particle);
-        b.node.classList.remove('hint', 'selected');
-        b.node.classList.add('matched');
-        round.grid[b.r][b.c] = null;
-      });
-      round.cleared++;
+    const done = completedColours();
+    const newlyDone = [...done].filter(id => !round.done.has(id));
+    round.done = done;
+    if (!newlyDone.length) return;
+
+    const justDone = new Set(newlyDone);
+    round.blocks.forEach(b => {
+      if (justDone.has(b.colorId)) burstParticles(b.node, b.particle);
     });
-    const gone = new Set(complete.flat());
-    round.blocks = round.blocks.filter(b => !gone.has(b));
 
     sound.match();
-    if (round.cleared === round.totalColours) {
+    if (done.size === round.totalColours) {
       countdown.stop();
       finishRound();
     } else {
@@ -791,7 +802,7 @@
   function failRound() {
     round.active = false;
     clearSelection();
-    el.failMatchedCount.textContent = round.cleared + ' of ' + round.totalColours + ' colours cleared';
+    el.failMatchedCount.textContent = round.done.size + ' of ' + round.totalColours + ' colours connected';
     el.failOverlay.classList.add('show');
   }
 

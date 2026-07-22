@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Match the Colours</title>
-<meta name="description" content="Slide rows and columns to unite every block of the same colour as fast as you can.">
+<meta name="description" content="Slide rows and columns to connect every block of the same colour as fast as you can.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -48,7 +48,7 @@
       <svg id="logo" viewBox="0 0 460 46" xmlns="http://www.w3.org/2000/svg">
         <text x="50%" y="34" text-anchor="middle" font-family="'Sora',sans-serif" font-weight="700" font-size="34" fill="#2F3E46" letter-spacing="0.2">Match the <tspan fill="#E14434">Colours</tspan></text>
       </svg>
-      <p class="tagline">Tap a block, then tap a highlighted one to slide its row or column — bring matching colours together to clear them.</p>
+      <p class="tagline">Tap a block, then tap a highlighted one to slide its row or column — connect every colour into one piece. Connected pieces lock the lines they cross.</p>
     </div>
 
     <div class="start-row">
@@ -78,14 +78,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
     </div>
     <h2>Time's up</h2>
-    <div class="subtitle" id="failMatchedCount">0 of 0 matched</div>
+    <div class="subtitle" id="failMatchedCount">0 of 0 colours connected</div>
   </div>
 
   <div id="overlay">
     <div class="overlay-badge">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
     </div>
-    <h2>All matched</h2>
+    <h2>All connected</h2>
     <div class="subtitle">Your time</div>
     <div class="time" id="finalTime">0.00s</div>
     <div id="leaderboard">

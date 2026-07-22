@@ -221,12 +221,11 @@ html,body{
   padding:0;
   transition:left 0.22s ease, top 0.22s ease,
              width 0.22s ease, height 0.22s ease,
-             border-radius 0.22s ease, opacity 0.25s;
+             border-radius 0.22s ease;
 }
 .swatch:hover{ outline:2px solid var(--ink-faint); outline-offset:2px; }
 .swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
-.swatch.matched{ opacity:0; pointer-events:none; }
 
 .particle{
   position:absolute;
