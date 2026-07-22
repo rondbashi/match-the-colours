@@ -86,7 +86,7 @@ html,body{
 #soundToggle{
   display:flex; align-items:center; gap:8px;
   padding:9px 14px 9px 11px;
-  background:var(--c-blue);
+  background:var(--c-blue-pale);
   border-radius:999px;
   cursor:pointer;
   font-family:var(--font-body);
@@ -105,7 +105,7 @@ html,body{
 #hardModeToggle{
   display:flex; align-items:center; gap:7px;
   padding:9px 14px 9px 12px;
-  background:var(--panel);
+  background:var(--c-pink-pale);
   border-radius:999px;
   cursor:pointer;
   font-family:var(--font-body);
@@ -120,7 +120,7 @@ html,body{
 #hardModeToggle svg.chevron{ width:11px; height:11px; display:block; flex-shrink:0; transition:transform 0.12s; }
 #hardModeToggle:hover{ background:var(--c-pink-pale); }
 #hardModeToggle.active{
-  background:var(--c-pink); color:var(--ink);
+  background:var(--c-pink-pale); color:var(--ink);
 }
 #hardModeToggle[aria-expanded="true"] svg.chevron{ transform:rotate(180deg); }
 
@@ -209,30 +209,24 @@ html,body{
 }
 
 /* A swatch is read purely as colour, so no state may tint or fade the fill:
-   selection and mismatch are drawn as outlines set off the tile by a gap. */
+   selection and move hints are drawn as outlines set off the tile by a gap.
+   Left/top/size transitions animate row and column slides; the border radius
+   is set per-corner inline so fused same-colour neighbours read as one shape. */
 .swatch{
   position:absolute;
+  border:none;
   border-radius:var(--radius-sm);
   cursor:pointer;
   user-select:none;
   padding:0;
-  transition:opacity 0.25s;
+  transition:left 0.22s ease, top 0.22s ease,
+             width 0.22s ease, height 0.22s ease,
+             border-radius 0.22s ease, opacity 0.25s;
 }
 .swatch:hover{ outline:2px solid var(--ink-faint); outline-offset:2px; }
+.swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
-.swatch.mismatch{
-  animation:shake 0.4s;
-  outline:3px solid var(--danger); outline-offset:2px;
-}
 .swatch.matched{ opacity:0; pointer-events:none; }
-
-@keyframes shake{
-  0%,100%{ transform:translateX(0); }
-  20%{ transform:translateX(-5px); }
-  40%{ transform:translateX(5px); }
-  60%{ transform:translateX(-3px); }
-  80%{ transform:translateX(3px); }
-}
 
 .particle{
   position:absolute;

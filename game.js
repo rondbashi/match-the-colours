@@ -12,12 +12,13 @@
 
   // A standard round is the whole palette, one pair each. The long-list option
   // cannot add new colours (the palette is fixed), so it adds pairs per colour
-  // instead — 3x the tiles, which is what the option actually promises.
+  // instead — 3x the tiles. With the sliding mechanic that also changes the
+  // goal per colour: a colour clears only when ALL of its copies are joined
+  // into one connected group, so long list asks for 6-block chains, not pairs.
   const BASE_PAIR_COUNT = 20;
   const LONG_LIST_MULTIPLIER = 3;
-  const DEV_PAIR_COUNT = 1;
-  const SET_SIZE = 2;                  // a match is always exactly two swatches
-  const MISMATCH_CLEAR_MS = 400;       // keep in sync with the .mismatch shake duration
+  const DEV_PAIR_COUNT = 3;            // 6 tiles — smallest board that still slides
+  const SET_SIZE = 2;                  // tiles added per pair
   const MAX_SCORES = 10;
 
   const STORAGE_KEYS = {
@@ -137,7 +138,7 @@
         return enabled;
       },
       click() { if (enabled) tone(720, 0, 0.07, 'square', 0.05); },
-      mismatch() { if (enabled) tone(220, 0, 0.16, 'sine', 0.05); },
+      move() { if (enabled) tone(520, 0, 0.09, 'square', 0.045); },
       match() { if (enabled) chord([660, 880, 1100, 1320], 0.06, 0.32, 'triangle', 0.045); },
       finish() { if (enabled) chord([523.25, 659.25, 783.99, 1046.5], 0.09, 0.4, 'triangle', 0.05); },
       tick() { if (enabled) tone(880, 0, 0.08, 'square', 0.04); },
@@ -329,7 +330,7 @@
       }
     },
 
-    // Restarted after every successful match, so the clock is per-pair.
+    // Restarted after every cleared colour, so the clock is per-clear.
     restart(onExpire) {
       if (!this.active) return;
       this.stop();
@@ -384,55 +385,56 @@
   }
 
   /* =========================================================================
-   * Round
+   * Round state
+   *
+   * The board is a full cols x rows grid (tile count always factorizes — it is
+   * even) where every cell holds a block or, after a colour clears, a gap.
+   * All movement is a cyclic rotation of one row or column, so the grid stays
+   * rectangular for the whole round and gaps simply rotate along with blocks.
    * ======================================================================= */
 
   const round = {
     active: false,
-    selected: [],
-    nodes: [],
-    matched: 0,
-    totalPairs: 0,
+    cols: 0,
+    rows: 0,
+    grid: [],            // grid[r][c] -> block | null
+    blocks: [],          // live blocks (cleared ones are removed)
+    selected: null,      // block whose row/column is currently highlighted
+    hinted: [],          // blocks carrying the .hint outline
+    colourTotal: {},     // colorId -> copies on this board (the clear target)
+    cleared: 0,
+    totalColours: 0,
+    cellSize: 0,
+    originX: 0,
+    originY: 0,
     startedAt: 0
   };
 
   /**
    * Shuffling the palette first means a round shorter than the palette draws a
    * random subset rather than always the same leading colours, and a round
-   * longer than it reuses colours evenly — each extra cycle simply adds another
-   * pair of an existing colour, which stays consistent because any two tiles of
-   * one colour are a valid match.
+   * longer than it reuses colours evenly.
    */
-  function buildSwatches(pairCount) {
+  function buildTiles(pairCount) {
     const order = shuffle(PALETTE.map((hex, id) => ({ hex, id })));
     const tiles = [];
-
     for (let pair = 0; pair < pairCount; pair++) {
       const colour = order[pair % order.length];
       for (let copy = 0; copy < SET_SIZE; copy++) tiles.push(colour);
     }
-    shuffle(tiles);
-
-    return tiles.map(tile => {
-      const node = document.createElement('div');
-      node.className = 'swatch';
-      node.style.background = tile.hex;
-      node.dataset.colorId = tile.id;
-      node.dataset.particle = darken(tile.hex, 0.6);
-      node.addEventListener('click', onSwatchClick);
-      return node;
-    });
+    return shuffle(tiles);
   }
 
   /**
-   * Pick the column count whose resulting square is largest — the squares are
-   * uniform, so filling the board is purely a question of which split of the
-   * count wastes the least space in the board's aspect ratio.
+   * Cyclic row/column moves need a full rectangle, so unlike a free grid the
+   * column count must divide the tile count exactly; among those, pick the
+   * split whose uniform square is largest for the current board.
    */
-  function computeGrid(count, width, height, gap) {
+  function pickGridDims(count, width, height, gap) {
     let best = { cols: count, rows: 1, size: 0 };
     for (let cols = 1; cols <= count; cols++) {
-      const rows = Math.ceil(count / cols);
+      if (count % cols !== 0) continue;
+      const rows = count / cols;
       const size = Math.min(
         (width - gap * (cols - 1)) / cols,
         (height - gap * (rows - 1)) / rows
@@ -442,134 +444,337 @@
     return best;
   }
 
+  function countAdjacencyConflicts(tiles, cols) {
+    let n = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      const c = i % cols;
+      if (c + 1 < cols && tiles[i].id === tiles[i + 1].id) n++;
+      if (i + cols < tiles.length && tiles[i].id === tiles[i + cols].id) n++;
+    }
+    return n;
+  }
+
   /**
-   * Positions are a pure function of (count, board size), so this is also the
-   * resize handler: matched swatches keep their slot, which is what stops the
-   * survivors from sliding around mid-round.
+   * Same-colour neighbours fuse (and a complete colour clears) the moment they
+   * touch, so the opening board must not hand any connection out for free.
+   * Hill-climb on random swaps until no two same-colour tiles are orthogonal
+   * neighbours; the cap is a safety net, in practice it converges in a few
+   * hundred swaps even on the 3x board.
    */
+  function arrangeTiles(tiles, cols) {
+    let conflicts = countAdjacencyConflicts(tiles, cols);
+    for (let tries = 0; tries < 6000 && conflicts > 0; tries++) {
+      const i = randInt(0, tiles.length - 1);
+      const j = randInt(0, tiles.length - 1);
+      if (i === j) continue;
+      [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+      const next = countAdjacencyConflicts(tiles, cols);
+      if (next <= conflicts) conflicts = next;
+      else [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+    }
+    return tiles;
+  }
+
+  /* =========================================================================
+   * Grid queries
+   * ======================================================================= */
+
+  function blockAt(r, c) {
+    return (r >= 0 && r < round.rows && c >= 0 && c < round.cols) ? round.grid[r][c] : null;
+  }
+
+  /** Fused = same colour and orthogonally adjacent (no wrap: the seam between
+   *  the two board edges is not a connection, even though moves wrap). */
+  function fusedWith(block, r, c) {
+    const other = blockAt(r, c);
+    return !!other && other.colorId === block.colorId;
+  }
+
+  /** The connected group the block currently belongs to, via flood fill.
+   *  Connectivity is always derived from the grid rather than stored, so
+   *  groups split and re-fuse naturally as rows slide through each other. */
+  function groupOf(block) {
+    const group = [block];
+    const seen = new Set([block]);
+    for (let i = 0; i < group.length; i++) {
+      const b = group[i];
+      [[b.r - 1, b.c], [b.r + 1, b.c], [b.r, b.c - 1], [b.r, b.c + 1]].forEach(([r, c]) => {
+        const n = blockAt(r, c);
+        if (n && n.colorId === b.colorId && !seen.has(n)) {
+          seen.add(n);
+          group.push(n);
+        }
+      });
+    }
+    return group;
+  }
+
+  /**
+   * A lone block moves along its row or its column. A fused group is locked
+   * to its longer bounding-box axis — wide groups slide horizontally, tall
+   * ones vertically, and a square-bounded group keeps both.
+   */
+  function allowedAxes(block) {
+    const group = groupOf(block);
+    if (group.length === 1) return { row: true, col: true };
+    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+    group.forEach(b => {
+      minR = Math.min(minR, b.r); maxR = Math.max(maxR, b.r);
+      minC = Math.min(minC, b.c); maxC = Math.max(maxC, b.c);
+    });
+    const w = maxC - minC + 1;
+    const h = maxR - minR + 1;
+    return { row: w >= h, col: h >= w };
+  }
+
+  /* =========================================================================
+   * Selection & movement
+   * ======================================================================= */
+
+  function clearSelection() {
+    if (round.selected) round.selected.node.classList.remove('selected');
+    round.selected = null;
+    round.hinted.forEach(b => b.node.classList.remove('hint'));
+    round.hinted = [];
+  }
+
+  function select(block) {
+    clearSelection();
+    round.selected = block;
+    block.node.classList.add('selected');
+
+    const axes = allowedAxes(block);
+    round.blocks.forEach(b => {
+      if (b === block) return;
+      if ((axes.row && b.r === block.r) || (axes.col && b.c === block.c)) {
+        b.node.classList.add('hint');
+        round.hinted.push(b);
+      }
+    });
+  }
+
+  function onBlockClick(block, event) {
+    if (!round.active) return;
+    event.stopPropagation();          // keep the board's deselect handler out
+
+    if (round.selected === block) {   // tapping the selection clears it
+      sound.click();
+      clearSelection();
+      return;
+    }
+
+    if (round.selected && block.node.classList.contains('hint')) {
+      moveTo(round.selected, block);
+      return;
+    }
+
+    sound.click();
+    select(block);                    // otherwise the tap moves the selection
+  }
+
+  /** Rotate the shared row/column so `sel` lands exactly on `dest`'s cell;
+   *  everything in between shifts one step and the edge wraps around. */
+  function moveTo(sel, dest) {
+    if (dest.r === sel.r) rotateRow(sel.r, dest.c - sel.c);
+    else rotateColumn(sel.c, dest.r - sel.r);
+
+    clearSelection();
+    sound.move();
+    refreshBoard();
+  }
+
+  function rotateRow(r, delta) {
+    const cols = round.cols;
+    const row = round.grid[r];
+    const next = new Array(cols);
+    for (let c = 0; c < cols; c++) {
+      const target = ((c + delta) % cols + cols) % cols;
+      next[target] = row[c];
+      if (row[c]) row[c].c = target;
+    }
+    round.grid[r] = next;
+  }
+
+  function rotateColumn(c, delta) {
+    const rows = round.rows;
+    const column = round.grid.map(row => row[c]);
+    for (let r = 0; r < rows; r++) {
+      const target = ((r + delta) % rows + rows) % rows;
+      round.grid[target][c] = column[r];
+      if (column[r]) column[r].r = target;
+    }
+  }
+
+  /* =========================================================================
+   * Board rendering
+   *
+   * Cell positions are a pure function of (r, c) and the measured cell size.
+   * Fused neighbours are drawn as one shape: a block extends over the gutter
+   * toward a fused right/down neighbour and squares off the shared corners,
+   * so a chain reads as a single long piece.
+   * ======================================================================= */
+
+  const SWATCH_RADIUS = 6;             // must match --radius-sm in styles.css
+
+  function layoutMetrics() {
+    const reserve = topControlsReserve();
+    const width = el.board.clientWidth - BOARD_PADDING * 2;
+    const height = el.board.clientHeight - BOARD_PADDING * 2 - reserve;
+    if (width <= 0 || height <= 0 || !round.cols) return;
+
+    const size = Math.max(1, Math.floor(Math.min(
+      (width - GRID_GAP * (round.cols - 1)) / round.cols,
+      (height - GRID_GAP * (round.rows - 1)) / round.rows
+    )));
+    const gridW = round.cols * size + GRID_GAP * (round.cols - 1);
+    const gridH = round.rows * size + GRID_GAP * (round.rows - 1);
+
+    round.cellSize = size;
+    round.originX = BOARD_PADDING + (width - gridW) / 2;
+    round.originY = BOARD_PADDING + reserve + (height - gridH) / 2;
+  }
+
+  function positionAll() {
+    const size = round.cellSize;
+    const step = size + GRID_GAP;
+
+    round.blocks.forEach(b => {
+      const up = fusedWith(b, b.r - 1, b.c);
+      const down = fusedWith(b, b.r + 1, b.c);
+      const left = fusedWith(b, b.r, b.c - 1);
+      const right = fusedWith(b, b.r, b.c + 1);
+
+      b.node.style.left = Math.round(round.originX + b.c * step) + 'px';
+      b.node.style.top = Math.round(round.originY + b.r * step) + 'px';
+      b.node.style.width = (size + (right ? GRID_GAP : 0)) + 'px';
+      b.node.style.height = (size + (down ? GRID_GAP : 0)) + 'px';
+      b.node.style.borderRadius =
+        ((left || up) ? 0 : SWATCH_RADIUS) + 'px ' +
+        ((right || up) ? 0 : SWATCH_RADIUS) + 'px ' +
+        ((right || down) ? 0 : SWATCH_RADIUS) + 'px ' +
+        ((left || down) ? 0 : SWATCH_RADIUS) + 'px';
+    });
+  }
+
   /**
    * The timer and home button float over the board, so the grid has to start
-   * below them or the top row sits under a control that both hides a swatch and
-   * swallows its clicks. Measured off the button rather than hard-coded so it
-   * still clears the safe-area inset on a notched phone.
+   * below them or the top row sits under a control that both hides a swatch
+   * and swallows its clicks.
    */
   function topControlsReserve() {
     const controlsBottom = el.backBtn.offsetTop + el.backBtn.offsetHeight + 8;
     return Math.max(0, controlsBottom - BOARD_PADDING);
   }
 
-  function layoutGrid(nodes) {
-    const reserve = topControlsReserve();
-    const width = el.board.clientWidth - BOARD_PADDING * 2;
-    const height = el.board.clientHeight - BOARD_PADDING * 2 - reserve;
-    if (!nodes.length || width <= 0 || height <= 0) return;
-
-    const grid = computeGrid(nodes.length, width, height, GRID_GAP);
-    const size = Math.max(1, Math.floor(grid.size));
-    const step = size + GRID_GAP;
-    const gridHeight = grid.rows * size + GRID_GAP * (grid.rows - 1);
-    const top = BOARD_PADDING + reserve + (height - gridHeight) / 2;
-
-    nodes.forEach((node, i) => {
-      const row = Math.floor(i / grid.cols);
-      const col = i % grid.cols;
-      // A short final row is centred rather than left-aligned.
-      const inRow = Math.min(grid.cols, nodes.length - row * grid.cols);
-      const rowLeft = BOARD_PADDING + (width - (inRow * size + GRID_GAP * (inRow - 1))) / 2;
-
-      node.style.width = size + 'px';
-      node.style.height = size + 'px';
-      node.style.left = Math.round(rowLeft + col * step) + 'px';
-      node.style.top = Math.round(top + row * step) + 'px';
-    });
-  }
-
-  // A viewport change (resize, rotate) changes the ideal grid, so re-lay-out —
+  // A viewport change (resize, rotate) changes the cell size, not the grid —
   // coalesced into one frame so dragging a window edge doesn't thrash.
   let relayoutQueued = false;
   function queueRelayout() {
-    if (relayoutQueued || !round.nodes.length) return;
+    if (relayoutQueued || !round.blocks.length) return;
     relayoutQueued = true;
     requestAnimationFrame(() => {
       relayoutQueued = false;
-      layoutGrid(round.nodes);
+      layoutMetrics();
+      positionAll();
     });
   }
   window.addEventListener('resize', queueRelayout);
   window.addEventListener('orientationchange', () => setTimeout(queueRelayout, 60));
 
+  /* =========================================================================
+   * Round flow
+   * ======================================================================= */
+
   function startRound(pairCount) {
     el.overlay.classList.remove('show');
     el.failOverlay.classList.remove('show');
     el.board.innerHTML = '';
+    clearSelection();
 
-    const nodes = buildSwatches(pairCount);
+    const tiles = buildTiles(pairCount);
+    const reserve = topControlsReserve();
+    const dims = pickGridDims(
+      tiles.length,
+      el.board.clientWidth - BOARD_PADDING * 2,
+      el.board.clientHeight - BOARD_PADDING * 2 - reserve,
+      GRID_GAP
+    );
+    arrangeTiles(tiles, dims.cols);
 
     round.active = true;
-    round.selected = [];
-    round.nodes = nodes;
-    round.matched = 0;
-    round.totalPairs = nodes.length / SET_SIZE;   // trust what was actually built
+    round.cols = dims.cols;
+    round.rows = dims.rows;
+    round.grid = [];
+    round.blocks = [];
+    round.colourTotal = {};
+    round.cleared = 0;
+
+    tiles.forEach(tile => {
+      round.colourTotal[tile.id] = (round.colourTotal[tile.id] || 0) + 1;
+    });
+    round.totalColours = Object.keys(round.colourTotal).length;
+
+    for (let r = 0; r < dims.rows; r++) {
+      const row = [];
+      for (let c = 0; c < dims.cols; c++) {
+        const tile = tiles[r * dims.cols + c];
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'swatch';
+        node.style.background = tile.hex;
+        const block = { r, c, colorId: tile.id, hex: tile.hex, particle: darken(tile.hex, 0.6), node };
+        node.addEventListener('click', (e) => onBlockClick(block, e));
+        row.push(block);
+        round.blocks.push(block);
+      }
+      round.grid.push(row);
+    }
 
     el.hardTimer.style.display = countdown.active ? 'flex' : 'none';
 
-    nodes.forEach(node => el.board.appendChild(node));
-    layoutGrid(nodes);
+    layoutMetrics();
+    positionAll();                     // styles set before insertion: no slide-in
+    round.blocks.forEach(b => el.board.appendChild(b.node));
 
     round.startedAt = Date.now();
     countdown.restart(failRound);
   }
 
-  function onSwatchClick(e) {
-    if (!round.active) return;
+  /** After every move: redraw fuses, then clear any colour whose every copy
+   *  is now in one connected group. */
+  function refreshBoard() {
+    positionAll();
 
-    const node = e.currentTarget;
-    if (node.classList.contains('matched')) return;
-
-    sound.click();
-
-    const index = round.selected.indexOf(node);
-    if (index !== -1) {                          // tapping a selection clears it
-      node.classList.remove('selected');
-      round.selected.splice(index, 1);
-      return;
-    }
-
-    node.classList.add('selected');
-    round.selected.push(node);
-    if (round.selected.length < SET_SIZE) return;
-
-    const picked = round.selected;
-    round.selected = [];
-
-    const isMatch = picked.every(n => n.dataset.colorId === picked[0].dataset.colorId);
-    if (isMatch) resolveMatch(picked);
-    else resolveMismatch(picked);
-  }
-
-  function resolveMatch(picked) {
-    picked.forEach(node => {
-      burstParticles(node, node.dataset.particle);
-      node.classList.remove('selected');
-      node.classList.add('matched');
+    const seen = new Set();
+    const complete = [];
+    round.blocks.forEach(b => {
+      if (seen.has(b)) return;
+      const group = groupOf(b);
+      group.forEach(m => seen.add(m));
+      if (group.length === round.colourTotal[b.colorId]) complete.push(group);
     });
-    sound.match();
 
-    round.matched++;
-    if (round.matched === round.totalPairs) {
+    if (!complete.length) return;
+
+    complete.forEach(group => {
+      group.forEach(b => {
+        burstParticles(b.node, b.particle);
+        b.node.classList.remove('hint', 'selected');
+        b.node.classList.add('matched');
+        round.grid[b.r][b.c] = null;
+      });
+      round.cleared++;
+    });
+    const gone = new Set(complete.flat());
+    round.blocks = round.blocks.filter(b => !gone.has(b));
+
+    sound.match();
+    if (round.cleared === round.totalColours) {
       countdown.stop();
       finishRound();
     } else {
       countdown.restart(failRound);
     }
-  }
-
-  function resolveMismatch(picked) {
-    sound.mismatch();
-    picked.forEach(node => node.classList.add('mismatch'));
-    setTimeout(() => {
-      picked.forEach(node => node.classList.remove('selected', 'mismatch'));
-    }, MISMATCH_CLEAR_MS);
   }
 
   function finishRound() {
@@ -585,9 +790,15 @@
 
   function failRound() {
     round.active = false;
-    el.failMatchedCount.textContent = round.matched + ' of ' + round.totalPairs + ' matched';
+    clearSelection();
+    el.failMatchedCount.textContent = round.cleared + ' of ' + round.totalColours + ' colours cleared';
     el.failOverlay.classList.add('show');
   }
+
+  // A tap on empty board space drops the current selection.
+  el.board.addEventListener('click', () => {
+    if (round.active) clearSelection();
+  });
 
   /* =========================================================================
    * Navigation
@@ -602,7 +813,8 @@
 
   function showTitle() {
     round.active = false;
-    round.nodes = [];
+    round.blocks = [];
+    clearSelection();
     countdown.stop();
     el.overlay.classList.remove('show');
     el.failOverlay.classList.remove('show');
