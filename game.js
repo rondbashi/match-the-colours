@@ -606,11 +606,61 @@
   });
 
   let seamNodes = [];
+  let outlineNodes = [];
 
   function hideSplitControls() {
     splitBtn.style.display = 'none';
     seamNodes.forEach(n => n.remove());
     seamNodes = [];
+  }
+
+  function hidePieceOutline() {
+    outlineNodes.forEach(n => n.remove());
+    outlineNodes = [];
+  }
+
+  /**
+   * Selecting a bonded piece outlines the piece as a whole, not the tapped
+   * block: one bar per exposed edge, extended past exposed corners so the
+   * bars meet, tracing the silhouette of the fused shape.
+   */
+  function showPieceOutline(group) {
+    const size = round.cellSize;
+    const step = size + GRID_GAP;
+    const off = 2;                     // matches the .selected outline-offset
+    const t = 3;                       // matches the .selected outline width
+
+    group.forEach(b => {
+      const up = bondedAt(b, b.r - 1, b.c);
+      const down = bondedAt(b, b.r + 1, b.c);
+      const left = bondedAt(b, b.r, b.c - 1);
+      const right = bondedAt(b, b.r, b.c + 1);
+      const x = round.originX + b.c * step;
+      const y = round.originY + b.r * step;
+      const w = size + (right ? GRID_GAP : 0);
+      const h = size + (down ? GRID_GAP : 0);
+
+      const bars = [];
+      if (!up) bars.push([x - (left ? 0 : off + t), y - off - t,
+                          w + (left ? 0 : off + t) + (right ? 0 : off + t), t]);
+      if (!down) bars.push([x - (left ? 0 : off + t), y + h + off,
+                            w + (left ? 0 : off + t) + (right ? 0 : off + t), t]);
+      if (!left) bars.push([x - off - t, y - (up ? 0 : off + t),
+                            t, h + (up ? 0 : off + t) + (down ? 0 : off + t)]);
+      if (!right) bars.push([x + w + off, y - (up ? 0 : off + t),
+                             t, h + (up ? 0 : off + t) + (down ? 0 : off + t)]);
+
+      bars.forEach(([bx, by, bw, bh]) => {
+        const bar = document.createElement('div');
+        bar.className = 'piece-outline';
+        bar.style.left = Math.round(bx) + 'px';
+        bar.style.top = Math.round(by) + 'px';
+        bar.style.width = Math.round(bw) + 'px';
+        bar.style.height = Math.round(bh) + 'px';
+        el.board.appendChild(bar);
+        outlineNodes.push(bar);
+      });
+    });
   }
 
   /**
@@ -662,14 +712,17 @@
     round.hinted.forEach(b => b.node.classList.remove('hint'));
     round.hinted = [];
     hideSplitControls();
+    hidePieceOutline();
   }
 
   function select(block) {
     clearSelection();
     round.selected = block;
-    block.node.classList.add('selected');
 
     const group = groupOf(block);
+    if (group.length === 1) block.node.classList.add('selected');
+    else showPieceOutline(group);      // the whole piece is selected, not one block
+
     const rowBand = movableRows(group);
     const colBand = movableColumns(group);
 
@@ -683,7 +736,10 @@
       }
     });
 
-    if (group.length > 1) showSplitControls(group);
+    // Splitting is the way out when a piece is stuck, so the scissors and
+    // seams appear only when no move is on offer; a piece with highlighted
+    // destinations moves instead.
+    if (group.length > 1 && round.hinted.length === 0) showSplitControls(group);
   }
 
   /** Break every bond in the selected piece; the blocks stay where they are
@@ -874,11 +930,7 @@
       relayoutQueued = false;
       layoutMetrics();
       positionAll();
-      if (round.selected) {
-        hideSplitControls();
-        const group = groupOf(round.selected);
-        if (group.length > 1) showSplitControls(group);
-      }
+      if (round.selected) select(round.selected);   // re-derive outline/seams at the new scale
     });
   }
   window.addEventListener('resize', queueRelayout);

@@ -235,6 +235,13 @@ html,body{
   position:absolute; z-index:12;
   pointer-events:none;
 }
+/* Selection outline for a bonded piece: absolute bars tracing the fused
+   silhouette, standing in for the single-block .selected outline. */
+.piece-outline{
+  position:absolute; z-index:13;
+  background:var(--ink);
+  pointer-events:none;
+}
 .seam-v{ width:0; border-left:2px dotted currentColor; transform:translateX(-1px); }
 .seam-h{ height:0; border-top:2px dotted currentColor; transform:translateY(-1px); }
 
