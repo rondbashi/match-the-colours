@@ -614,6 +614,7 @@
 
   let seamNodes = [];
   let outlineNodes = [];
+  let raisedNodes = [];
 
   function hideSplitControls() {
     splitBtn.style.display = 'none';
@@ -624,6 +625,19 @@
   function hidePieceOutline() {
     outlineNodes.forEach(n => n.remove());
     outlineNodes = [];
+  }
+
+  // Lift the selected piece above the other swatches so a neighbouring
+  // block's hint outline can't bleed over it or its split seam.
+  function raisePiece(group) {
+    lowerPiece();
+    group.forEach(b => b.node.classList.add('raised'));
+    raisedNodes = group.map(b => b.node);
+  }
+
+  function lowerPiece() {
+    raisedNodes.forEach(n => n.classList.remove('raised'));
+    raisedNodes = [];
   }
 
   /**
@@ -720,6 +734,7 @@
     round.hinted = [];
     hideSplitControls();
     hidePieceOutline();
+    lowerPiece();
   }
 
   function select(block) {
@@ -727,8 +742,12 @@
     round.selected = block;
 
     const group = groupOf(block);
-    if (group.length === 1) block.node.classList.add('selected');
-    else showPieceOutline(group);      // the whole piece is selected, not one block
+    if (group.length === 1) {
+      block.node.classList.add('selected');
+    } else {
+      raisePiece(group);               // lift the piece over neighbouring hint outlines
+      showPieceOutline(group);         // the whole piece is selected, not one block
+    }
 
     const horizontal = rowBand(group);
     const vertical = columnBand(group);

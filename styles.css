@@ -226,6 +226,10 @@ html,body{
 .swatch:hover{ outline:2px solid var(--ink-faint); outline-offset:2px; }
 .swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
+/* A selected bonded piece rides above the other swatches (still below the
+   seam/outline/scissors layers at z-index 12+) so neighbouring hint outlines
+   cannot bleed over the piece or its split seam. */
+.swatch.raised{ z-index:10; }
 
 /* A bonded piece blocking a locked selection protests with a silent nudge
    along the axis it is blocking. */
