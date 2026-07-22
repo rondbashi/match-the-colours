@@ -227,18 +227,29 @@ html,body{
 .swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
 
-/* Floating action shown over the board when the selection is a bonded piece. */
+/* Split affordance, shown when the selection is a bonded piece: a dotted
+   line over each bond seam and a scissors button at the piece's centre.
+   Seam colour is set inline per block (its darkened particle tone) so the
+   line stays visible on every palette fill. */
+.seam{
+  position:absolute; z-index:12;
+  pointer-events:none;
+}
+.seam-v{ width:0; border-left:2px dotted currentColor; transform:translateX(-1px); }
+.seam-h{ height:0; border-top:2px dotted currentColor; transform:translateY(-1px); }
+
 #splitBtn{
   position:absolute; z-index:15;
   display:none;
-  transform:translateX(-50%);
-  padding:5px 14px;
-  border:none; border-radius:999px;
+  align-items:center; justify-content:center;
+  transform:translate(-50%,-50%);
+  width:32px; height:32px;
+  border:none; border-radius:50%;
   background:var(--ink); color:#FFFFFF;
-  font-family:var(--font-body); font-weight:600; font-size:12px;
-  letter-spacing:0.2px;
   cursor:pointer;
+  transition:background 0.12s;
 }
+#splitBtn svg{ width:16px; height:16px; display:block; }
 #splitBtn:hover{ background:var(--c-red); }
 
 .particle{

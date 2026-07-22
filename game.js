@@ -591,24 +591,69 @@
   const splitBtn = document.createElement('button');
   splitBtn.id = 'splitBtn';
   splitBtn.type = 'button';
-  splitBtn.textContent = 'Split';
+  splitBtn.title = 'Split';
+  splitBtn.setAttribute('aria-label', 'Split');
+  splitBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle>' +
+    '<line x1="20" y1="4" x2="8.12" y2="15.88"></line>' +
+    '<line x1="14.47" y1="14.48" x2="20" y2="20"></line>' +
+    '<line x1="8.12" y1="8.12" x2="12" y2="12"></line></svg>';
   splitBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     splitSelected();
   });
 
-  function hideSplitButton() {
+  let seamNodes = [];
+
+  function hideSplitControls() {
     splitBtn.style.display = 'none';
+    seamNodes.forEach(n => n.remove());
+    seamNodes = [];
   }
 
-  /** Float the split button just above the block (below it for the top row). */
-  function showSplitButton(block) {
-    const step = round.cellSize + GRID_GAP;
-    const x = round.originX + block.c * step + round.cellSize / 2;
-    const above = round.originY + block.r * step - 34;
-    splitBtn.style.display = 'block';
-    splitBtn.style.left = Math.round(x) + 'px';
-    splitBtn.style.top = Math.round(above >= 0 ? above : above + step + 34 + 8) + 'px';
+  /**
+   * Mark where the piece would come apart: a dotted line over every bond
+   * seam (drawn in the block's own darkened tone so it reads on any fill),
+   * with the scissors floating at the centre of the piece — for a two-block
+   * piece that is exactly the middle of the shared edge.
+   */
+  function showSplitControls(group) {
+    const size = round.cellSize;
+    const step = size + GRID_GAP;
+
+    group.forEach(b => {
+      b.bonds.forEach(p => {
+        const seam = document.createElement('div');
+        seam.className = 'seam';
+        if (p.c === b.c + 1) {                       // vertical seam, right edge
+          seam.classList.add('seam-v');
+          seam.style.left = Math.round(round.originX + p.c * step - GRID_GAP / 2) + 'px';
+          seam.style.top = Math.round(round.originY + b.r * step) + 'px';
+          seam.style.height = size + 'px';
+        } else if (p.r === b.r + 1) {                // horizontal seam, bottom edge
+          seam.classList.add('seam-h');
+          seam.style.left = Math.round(round.originX + b.c * step) + 'px';
+          seam.style.top = Math.round(round.originY + p.r * step - GRID_GAP / 2) + 'px';
+          seam.style.width = size + 'px';
+        } else {
+          return;                                    // the partner owns this seam
+        }
+        seam.style.color = b.particle;
+        el.board.appendChild(seam);
+        seamNodes.push(seam);
+      });
+    });
+
+    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+    group.forEach(b => {
+      minR = Math.min(minR, b.r); maxR = Math.max(maxR, b.r);
+      minC = Math.min(minC, b.c); maxC = Math.max(maxC, b.c);
+    });
+    splitBtn.style.display = 'flex';
+    splitBtn.style.left = Math.round(round.originX + ((minC + maxC) / 2) * step + size / 2) + 'px';
+    splitBtn.style.top = Math.round(round.originY + ((minR + maxR) / 2) * step + size / 2) + 'px';
   }
 
   function clearSelection() {
@@ -616,7 +661,7 @@
     round.selected = null;
     round.hinted.forEach(b => b.node.classList.remove('hint'));
     round.hinted = [];
-    hideSplitButton();
+    hideSplitControls();
   }
 
   function select(block) {
@@ -638,7 +683,7 @@
       }
     });
 
-    if (group.length > 1) showSplitButton(block);
+    if (group.length > 1) showSplitControls(group);
   }
 
   /** Break every bond in the selected piece; the blocks stay where they are
@@ -829,7 +874,11 @@
       relayoutQueued = false;
       layoutMetrics();
       positionAll();
-      if (round.selected) showSplitButton(round.selected);
+      if (round.selected) {
+        hideSplitControls();
+        const group = groupOf(round.selected);
+        if (group.length > 1) showSplitControls(group);
+      }
     });
   }
   window.addEventListener('resize', queueRelayout);
