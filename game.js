@@ -532,32 +532,39 @@
    * truly adjacent.
    * ======================================================================= */
 
-  function movableRows(group) {
+  /** Band info for a horizontal move: `rows` is the rotatable band (or null),
+   *  and when a bonded piece crossing the band is what forbids the move, its
+   *  offending blocks are reported in `blockers` so they can protest. */
+  function rowBand(group) {
     const rows = [...new Set(group.map(b => b.r))];
-    if (rows.length > 1 && group.length !== 2) return null;
+    if (rows.length > 1 && group.length !== 2) return { rows: null, blockers: [] };
     const inBand = new Set(rows);
+    const blockers = new Set();
     for (const r of rows) {
       for (let c = 0; c < round.cols; c++) {
-        for (const p of round.grid[r][c].bonds) {
-          if (!inBand.has(p.r)) return null;
+        const b = round.grid[r][c];
+        for (const p of b.bonds) {
+          if (!inBand.has(p.r)) { blockers.add(b); blockers.add(p); }
         }
       }
     }
-    return rows;
+    return blockers.size ? { rows: null, blockers: [...blockers] } : { rows, blockers: [] };
   }
 
-  function movableColumns(group) {
+  function columnBand(group) {
     const cols = [...new Set(group.map(b => b.c))];
-    if (cols.length > 1 && group.length !== 2) return null;
+    if (cols.length > 1 && group.length !== 2) return { cols: null, blockers: [] };
     const inBand = new Set(cols);
+    const blockers = new Set();
     for (const c of cols) {
       for (let r = 0; r < round.rows; r++) {
-        for (const p of round.grid[r][c].bonds) {
-          if (!inBand.has(p.c)) return null;
+        const b = round.grid[r][c];
+        for (const p of b.bonds) {
+          if (!inBand.has(p.c)) { blockers.add(b); blockers.add(p); }
         }
       }
     }
-    return cols;
+    return blockers.size ? { cols: null, blockers: [...blockers] } : { cols, blockers: [] };
   }
 
   function rowShiftStraddlesSeam(rows, delta) {
@@ -723,23 +730,41 @@
     if (group.length === 1) block.node.classList.add('selected');
     else showPieceOutline(group);      // the whole piece is selected, not one block
 
-    const rowBand = movableRows(group);
-    const colBand = movableColumns(group);
+    const horizontal = rowBand(group);
+    const vertical = columnBand(group);
 
     round.blocks.forEach(b => {
       if (b === block) return;
-      const viaRow = rowBand && b.r === block.r && !rowShiftStraddlesSeam(rowBand, b.c - block.c);
-      const viaCol = colBand && b.c === block.c && !columnShiftStraddlesSeam(colBand, b.r - block.r);
+      const viaRow = horizontal.rows && b.r === block.r &&
+                     !rowShiftStraddlesSeam(horizontal.rows, b.c - block.c);
+      const viaCol = vertical.cols && b.c === block.c &&
+                     !columnShiftStraddlesSeam(vertical.cols, b.r - block.r);
       if (viaRow || viaCol) {
         b.node.classList.add('hint');
         round.hinted.push(b);
       }
     });
 
-    // Splitting is the way out when a piece is stuck, so the scissors and
-    // seams appear only when no move is on offer; a piece with highlighted
-    // destinations moves instead.
-    if (group.length > 1 && round.hinted.length === 0) showSplitControls(group);
+    if (group.length > 1) showSplitControls(group);
+
+    // Nowhere to go: the bonded pieces standing in the way protest with a
+    // little shake (silent), each along the axis it is blocking.
+    if (round.hinted.length === 0) {
+      const shaken = new Set();
+      horizontal.blockers.forEach(b => groupOf(b).forEach(m => {
+        if (!shaken.has(m)) { shaken.add(m); flashShake(m.node, 'shake-x'); }
+      }));
+      vertical.blockers.forEach(b => groupOf(b).forEach(m => {
+        if (!shaken.has(m)) { shaken.add(m); flashShake(m.node, 'shake-y'); }
+      }));
+    }
+  }
+
+  function flashShake(node, cls) {
+    node.classList.remove('shake-x', 'shake-y');
+    void node.offsetWidth;             // reflow so a repeat tap re-triggers the animation
+    node.classList.add(cls);
+    node.addEventListener('animationend', () => node.classList.remove(cls), { once: true });
   }
 
   /** Break every bond in the selected piece; the blocks stay where they are
@@ -781,11 +806,11 @@
     const before = sameColourAdjacencies();
 
     if (dest.r === sel.r) {
-      const band = movableRows(group);
+      const band = rowBand(group).rows;
       if (!band) { clearSelection(); return; }
       band.forEach(r => rotateRow(r, dest.c - sel.c));
     } else {
-      const band = movableColumns(group);
+      const band = columnBand(group).cols;
       if (!band) { clearSelection(); return; }
       band.forEach(c => rotateColumn(c, dest.r - sel.r));
     }

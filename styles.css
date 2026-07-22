@@ -227,6 +227,23 @@ html,body{
 .swatch.hint{ outline:2px dashed var(--ink-faint); outline-offset:2px; }
 .swatch.selected{ outline:3px solid var(--ink); outline-offset:2px; }
 
+/* A bonded piece blocking a locked selection protests with a silent nudge
+   along the axis it is blocking. */
+.swatch.shake-x{ animation:shakeX 0.3s; }
+.swatch.shake-y{ animation:shakeY 0.3s; }
+@keyframes shakeX{
+  0%,100%{ transform:none; }
+  25%{ transform:translateX(-3px); }
+  50%{ transform:translateX(3px); }
+  75%{ transform:translateX(-2px); }
+}
+@keyframes shakeY{
+  0%,100%{ transform:none; }
+  25%{ transform:translateY(-3px); }
+  50%{ transform:translateY(3px); }
+  75%{ transform:translateY(-2px); }
+}
+
 /* Split affordance, shown when the selection is a bonded piece: a dotted
    line over each bond seam and a scissors button at the piece's centre.
    Seam colour is set inline per block (its darkened particle tone) so the
