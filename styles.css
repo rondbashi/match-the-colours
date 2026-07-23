@@ -190,7 +190,11 @@ html,body{
   -webkit-overflow-scrolling:touch;
   padding:34px 44px 26px;
   display:flex; flex-direction:column; align-items:center; gap:18px;
+  scrollbar-color:var(--c-mist) transparent;   /* thumb, transparent track (Firefox) */
 }
+.rules-inner::-webkit-scrollbar{ width:10px; }
+.rules-inner::-webkit-scrollbar-track{ background:transparent; }
+.rules-inner::-webkit-scrollbar-thumb{ background:var(--c-mist); border-radius:999px; }
 .rules-title{
   margin:0; text-align:center;
   font-family:var(--font-display);
@@ -476,29 +480,6 @@ html,body{
 }
 #scoreList li .t{ font-weight:600; }
 #scoreList li .d{ color:var(--ink-faint); font-size:10.5px; margin-left:auto; }
-
-.icon-row{ display:flex; gap:22px; justify-content:center; }
-.icon-btn{
-  position:relative;
-  width:50px; height:50px; border-radius:50%;
-  background:var(--panel);
-  background:var(--c-pink-pale);
-  cursor:pointer;
-  display:flex; align-items:center; justify-content:center;
-  transition:background 0.12s;
-  color:var(--ink);
-  text-decoration:none;
-}
-.icon-btn svg{ width:20px; height:20px; }
-.icon-btn:hover{ background:var(--c-pink-pale); }
-.icon-btn .tooltip{
-  position:absolute; bottom:120%; left:50%; transform:translateX(-50%);
-  background:var(--ink); color:#FFFFFF; font-size:11px;
-  padding:4px 9px; border-radius:4px; white-space:nowrap;
-  opacity:0; pointer-events:none; transition:opacity 0.12s;
-  font-family:var(--font-body); font-weight:500;
-}
-.icon-btn:hover .tooltip{ opacity:1; }
 
 /* ---------- Mobile: narrow, stacked, full-viewport layout ---------- */
 @media (max-width:700px){

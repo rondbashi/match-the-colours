@@ -10,12 +10,9 @@
   const MOBILE_QUERY = '(max-width:700px)';
   const BOARD_PADDING = 16;            // must match #board padding in styles.css
 
-  // A standard round is the whole palette, one pair each. The long-list option
-  // cannot add new colours (the palette is fixed), so it adds pairs per colour
-  // instead — 3x the tiles. With the sliding mechanic that also changes the
-  // goal per colour: a colour is done when ALL of its copies are joined into
-  // one connected group, so long list asks for 6-block chains, not pairs.
-  const BASE_PAIR_COUNT = 20;
+  // A standard round is 8 pairs / 16 tiles — a gentle 4x4 board. The long-list
+  // (hard) option doubles it to 16 pairs / 32 tiles.
+  const BASE_PAIR_COUNT = 8;
   const LONG_LIST_MULTIPLIER = 2;
   const TEST_PAIR_COUNT = 2;           // shift+Start: 4 blocks, for testing
   const SET_SIZE = 2;                  // tiles added per pair
@@ -613,6 +610,39 @@
     return false;
   }
 
+  // The bonded pair(s) a given shift would carry across the wrap seam — the
+  // reason such a move is refused. Mirrors the straddle checks above so the
+  // shake lands on exactly the blocks that forbid the slide.
+  function rowStraddleBlockers(rows, delta) {
+    const cols = round.cols;
+    const out = [];
+    if (cols <= 2) return out;
+    for (const r of rows) {
+      for (let c = 0; c < cols - 1; c++) {
+        if (round.grid[r][c].bonds.has(round.grid[r][c + 1]) &&
+            (((c + 1 + delta) % cols) + cols) % cols === 0) {
+          out.push(round.grid[r][c], round.grid[r][c + 1]);
+        }
+      }
+    }
+    return out;
+  }
+
+  function columnStraddleBlockers(cols, delta) {
+    const rows = round.rows;
+    const out = [];
+    if (rows <= 2) return out;
+    for (const c of cols) {
+      for (let r = 0; r < rows - 1; r++) {
+        if (round.grid[r][c].bonds.has(round.grid[r + 1][c]) &&
+            (((r + 1 + delta) % rows) + rows) % rows === 0) {
+          out.push(round.grid[r][c], round.grid[r + 1][c]);
+        }
+      }
+    }
+    return out;
+  }
+
   /* =========================================================================
    * Selection & movement
    * ======================================================================= */
@@ -873,6 +903,27 @@
     if (round.selected && block.node.classList.contains('hint')) {
       moveTo(round.selected, block);
       return;
+    }
+
+    // A tap inside the highlighted row/column that isn't a legal landing means
+    // the slide would carry a connected pair past the edge (and it can't split
+    // itself to allow it). Keep the selection and shake the offending pair so
+    // it's clear why the move is refused — rather than re-highlighting a line.
+    if (round.selected) {
+      const inRowBand = rowBandEl.style.display !== 'none' && block.r === round.selected.r;
+      const inColBand = colBandEl.style.display !== 'none' && block.c === round.selected.c;
+      if (inRowBand || inColBand) {
+        const group = groupOf(round.selected);
+        const blockers = inRowBand
+          ? rowStraddleBlockers(rowBand(group).rows || [], block.c - round.selected.c)
+          : columnStraddleBlockers(columnBand(group).cols || [], block.r - round.selected.r);
+        const cls = inRowBand ? 'shake-x' : 'shake-y';
+        const shaken = new Set();
+        blockers.forEach(b => groupOf(b).forEach(m => {
+          if (!shaken.has(m)) { shaken.add(m); flashShake(m.node, cls); }
+        }));
+        return;
+      }
     }
 
     sound.click();
