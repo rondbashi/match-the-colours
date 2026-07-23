@@ -10,12 +10,9 @@
   const MOBILE_QUERY = '(max-width:700px)';
   const BOARD_PADDING = 16;            // must match #board padding in styles.css
 
-  // A standard round is 8 pairs / 16 tiles — a gentle 4x4 board. The long-list
-  // (hard) option doubles it to 16 pairs / 32 tiles.
-  const BASE_PAIR_COUNT = 8;
-  const LONG_LIST_MULTIPLIER = 2;
-  const TEST_PAIR_COUNT = 2;           // shift+Start: 4 blocks, for testing
-  const SET_SIZE = 2;                  // tiles added per pair
+  // Normal = the 8 base colours (a gentle 4x4 board). Hard = base + extras (all
+  // 20 colours). The colour sets themselves live below (BASE_COLOURS/EXTRA...).
+  const SET_SIZE = 2;                  // tiles per pair (a colour is done when both meet)
   const MAX_SCORES = 10;
 
   const STORAGE_KEYS = {
@@ -70,12 +67,24 @@
    * held at a neutral white that is deliberately not one of them.
    * ======================================================================= */
 
-  const PALETTE = [
-    '#5EABD6', '#3B7DA3', '#94D3EC', '#43927B', '#88C999',
-    '#C5E3A0', '#FEFBC7', '#FBE392', '#F2C48D', '#FF9666',
-    '#FFB4B4', '#B8336A', '#E14434', '#B22E22', '#DDA0DD',
-    '#8B5E83', '#D1D9E0', '#C68B59', '#8C7A6B', '#2F3E46'
+  // Normal mode draws from this fixed, friendly base set (one pair each).
+  const BASE_COLOURS = [
+    '#5EABD6',  // blue
+    '#FEFBC7',  // cream
+    '#FFB4B4',  // pink
+    '#E14434',  // red
+    '#88C999',  // green
+    '#FF9666',  // orange
+    '#FBE392',  // yellow
+    '#D1D9E0'   // mist
   ];
+  // Hard mode adds the rest of the palette on top of the base set.
+  const EXTRA_COLOURS = [
+    '#3B7DA3', '#94D3EC', '#43927B', '#C5E3A0', '#F2C48D',
+    '#B8336A', '#B22E22', '#DDA0DD', '#8B5E83', '#C68B59',
+    '#8C7A6B', '#2F3E46'
+  ];
+  const PALETTE = BASE_COLOURS.concat(EXTRA_COLOURS);
 
   // Vivid subset of the palette for confetti — drops the palest tones that
   // would vanish against the white board.
@@ -441,18 +450,14 @@
     startedAt: 0
   };
 
-  /**
-   * Shuffling the palette first means a round shorter than the palette draws a
-   * random subset rather than always the same leading colours, and a round
-   * longer than it reuses colours evenly.
-   */
-  function buildTiles(pairCount) {
-    const order = shuffle(PALETTE.map((hex, id) => ({ hex, id })));
+  /** One pair per colour in the given set, then shuffled onto the board. Each
+   *  colour keeps a stable id so completion can be tracked per colour. */
+  function buildTiles(colours) {
+    const order = colours.map((hex, id) => ({ hex, id }));
     const tiles = [];
-    for (let pair = 0; pair < pairCount; pair++) {
-      const colour = order[pair % order.length];
+    order.forEach(colour => {
       for (let copy = 0; copy < SET_SIZE; copy++) tiles.push(colour);
-    }
+    });
     return shuffle(tiles);
   }
 
@@ -1096,12 +1101,12 @@
    * Round flow
    * ======================================================================= */
 
-  function startRound(pairCount) {
+  function startRound(colours) {
     el.overlay.classList.remove('show');
     clearSelection();
     el.board.innerHTML = '';
 
-    const tiles = buildTiles(pairCount);
+    const tiles = buildTiles(colours);
     const reserve = topControlsReserve();
     const dims = pickGridDims(
       tiles.length,
@@ -1216,11 +1221,16 @@
    * Navigation
    * ======================================================================= */
 
-  function showGame(pairCount) {
+  // Colours in play this round: the base set, plus the extras in hard mode.
+  function roundColours() {
+    return settings.longList ? PALETTE : BASE_COLOURS;
+  }
+
+  function showGame(colours) {
     sound.unlock();                     // must happen inside the user gesture
     el.titleScreen.style.display = 'none';
     el.gameScreen.style.display = 'flex';
-    startRound(pairCount);
+    startRound(colours);
   }
 
   function showTitle() {
@@ -1235,8 +1245,8 @@
 
   // Shift+Start deals a 4-block board for quick rule testing.
   el.startBtn.addEventListener('click', (e) => {
-    if (e.shiftKey) showGame(TEST_PAIR_COUNT);
-    else showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
+    if (e.shiftKey) showGame(BASE_COLOURS.slice(0, 2));
+    else showGame(roundColours());
   });
 
   el.backBtn.addEventListener('click', showTitle);
@@ -1254,7 +1264,7 @@
   });
   el.rulesStartBtn.addEventListener('click', () => {
     el.rulesScreen.style.display = 'none';
-    showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
+    showGame(roundColours());
   });
 
 }());
