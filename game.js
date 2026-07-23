@@ -16,9 +16,8 @@
   // goal per colour: a colour is done when ALL of its copies are joined into
   // one connected group, so long list asks for 6-block chains, not pairs.
   const BASE_PAIR_COUNT = 20;
-  const LONG_LIST_MULTIPLIER = 3;
+  const LONG_LIST_MULTIPLIER = 2;
   const TEST_PAIR_COUNT = 2;           // shift+Start: 4 blocks, for testing
-  const DEV_PAIR_COUNT = 3;
   const SET_SIZE = 2;                  // tiles added per pair
   const MAX_SCORES = 10;
 
@@ -81,6 +80,14 @@
     '#8B5E83', '#D1D9E0', '#C68B59', '#8C7A6B', '#2F3E46'
   ];
 
+  // Vivid subset of the palette for confetti — drops the palest tones that
+  // would vanish against the white board.
+  const CONFETTI = [
+    '#5EABD6', '#3B7DA3', '#43927B', '#88C999', '#FBE392',
+    '#F2C48D', '#FF9666', '#FFB4B4', '#B8336A', '#E14434',
+    '#DDA0DD', '#8B5E83', '#C68B59'
+  ];
+
   /** Flat multiply toward black — keeps the hue, used so a burst stays visible
    *  even for the palest tiles (#FEFBC7, #D1D9E0) against the white board. */
   function darken(hex, factor) {
@@ -140,15 +147,9 @@
       },
       click() { if (enabled) tone(720, 0, 0.07, 'square', 0.05); },
       move() { if (enabled) tone(520, 0, 0.09, 'square', 0.045); },
-      split() { if (enabled) { tone(600, 0, 0.07, 'square', 0.045); tone(420, 0.06, 0.09, 'square', 0.045); } },
+      split() { if (enabled) { tone(660, 0, 0.06, 'triangle', 0.05); tone(990, 0.05, 0.1, 'triangle', 0.045); } },
       match() { if (enabled) chord([660, 880, 1100, 1320], 0.06, 0.32, 'triangle', 0.045); },
-      finish() { if (enabled) chord([523.25, 659.25, 783.99, 1046.5], 0.09, 0.4, 'triangle', 0.05); },
-      tick() { if (enabled) tone(880, 0, 0.08, 'square', 0.04); },
-      timeout() {
-        if (!enabled) return;
-        tone(260, 0, 0.18, 'sawtooth', 0.05);
-        tone(180, 0.12, 0.28, 'sawtooth', 0.05);
-      }
+      finish() { if (enabled) chord([523.25, 659.25, 783.99, 1046.5], 0.09, 0.4, 'triangle', 0.05); }
     };
   }());
 
@@ -162,27 +163,26 @@
     gameScreen: document.getElementById('gameScreen'),
     board: document.getElementById('board'),
     overlay: document.getElementById('overlay'),
-    failOverlay: document.getElementById('failOverlay'),
-    failMatchedCount: document.getElementById('failMatchedCount'),
     finalTime: document.getElementById('finalTime'),
     scoreList: document.getElementById('scoreList'),
-    hardTimer: document.getElementById('hardTimer'),
-    hardTimerValue: document.getElementById('hardTimerValue'),
+    playClock: document.getElementById('playClock'),
+    playClockValue: document.getElementById('playClockValue'),
     hardModeDropdown: document.getElementById('hardModeDropdown'),
     hardModeToggle: document.getElementById('hardModeToggle'),
     hardModePanel: document.getElementById('hardModePanel'),
     hardModeLabel: document.getElementById('hardModeLabel'),
-    optTimer5: document.getElementById('optCountTimer'),
-    optTimer10: document.getElementById('optCountTimer10'),
     optLongList: document.getElementById('optLongList'),
     soundToggle: document.getElementById('soundToggle'),
     soundIconOn: document.getElementById('soundIconOn'),
     soundIconOff: document.getElementById('soundIconOff'),
     soundLabel: document.getElementById('soundLabel'),
     startBtn: document.getElementById('startBtn'),
-    devStartBtn: document.getElementById('devStartBtn'),
     backBtn: document.getElementById('backBtn'),
-    failHomeBtn: document.getElementById('failHomeBtn')
+    rulesScreen: document.getElementById('rulesScreen'),
+    rulesInner: document.querySelector('#rulesScreen .rules-inner'),
+    rulesLink: document.getElementById('rulesLink'),
+    rulesBackBtn: document.getElementById('rulesBackBtn'),
+    rulesStartBtn: document.getElementById('rulesStartBtn')
   };
 
   /* =========================================================================
@@ -209,23 +209,19 @@
    * ======================================================================= */
 
   const settings = {
-    timerSeconds: 0,      // 0 = countdown off
     longList: false
   };
 
   function persistSettings() {
     storage.write(STORAGE_KEYS.settings, {
-      timerSeconds: settings.timerSeconds,
       longList: settings.longList
     });
   }
 
   function syncHardModeUI() {
-    el.optTimer5.checked = settings.timerSeconds === 5;
-    el.optTimer10.checked = settings.timerSeconds === 10;
     el.optLongList.checked = settings.longList;
 
-    const active = settings.timerSeconds > 0 || settings.longList;
+    const active = settings.longList;
     el.hardModeToggle.classList.toggle('active', active);
     el.hardModeLabel.textContent = active ? 'Hard mode: On' : 'Hard mode';
   }
@@ -233,24 +229,10 @@
   function restoreSettings() {
     const saved = storage.read(STORAGE_KEYS.settings, null);
     if (saved) {
-      settings.timerSeconds = saved.timerSeconds === 5 || saved.timerSeconds === 10 ? saved.timerSeconds : 0;
       settings.longList = !!saved.longList;
     }
     syncHardModeUI();
   }
-
-  // The two countdown lengths are mutually exclusive, so each acts as a radio
-  // that can also be switched off.
-  function bindTimerOption(input, seconds) {
-    input.addEventListener('change', () => {
-      settings.timerSeconds = input.checked ? seconds : 0;
-      syncHardModeUI();
-      persistSettings();
-    });
-  }
-
-  bindTimerOption(el.optTimer5, 5);
-  bindTimerOption(el.optTimer10, 10);
 
   el.optLongList.addEventListener('change', () => {
     settings.longList = el.optLongList.checked;
@@ -288,70 +270,110 @@
    * Match effect
    * ======================================================================= */
 
-  function burstParticles(swatch, color) {
-    const boardRect = el.board.getBoundingClientRect();
-    const rect = swatch.getBoundingClientRect();
-    const cx = rect.left - boardRect.left + rect.width / 2;
-    const cy = rect.top - boardRect.top + rect.height / 2;
-    const count = 10;
-
+  // A celebratory confetti burst: lively count, mixed sizes, a spin, and a
+  // multicoloured spray drawn from the vivid palette subset, centred on a point
+  // within a container.
+  function burstAt(container, cx, cy, count, spread) {
+    const reach = spread || 54;
     for (let i = 0; i < count; i++) {
       const p = document.createElement('div');
-      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
-      const distance = 30 + Math.random() * 26;
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+      const distance = 44 + Math.random() * reach;
+      const size = 8 + Math.random() * 6;
       p.className = 'particle';
       p.style.setProperty('--px', (Math.cos(angle) * distance).toFixed(1) + 'px');
       p.style.setProperty('--py', (Math.sin(angle) * distance).toFixed(1) + 'px');
+      p.style.setProperty('--rot', Math.round(Math.random() * 300 - 150) + 'deg');
+      p.style.width = p.style.height = size.toFixed(1) + 'px';
       p.style.left = cx + 'px';
       p.style.top = cy + 'px';
-      p.style.background = color;
-      el.board.appendChild(p);
+      p.style.background = CONFETTI[Math.floor(Math.random() * CONFETTI.length)];
+      container.appendChild(p);
       p.addEventListener('animationend', () => p.remove());
     }
   }
 
-  /* =========================================================================
-   * Countdown
-   * ======================================================================= */
+  function burstParticles(swatch) {
+    const boardRect = el.board.getBoundingClientRect();
+    const rect = swatch.getBoundingClientRect();
+    burstAt(el.board, rect.left - boardRect.left + rect.width / 2,
+            rect.top - boardRect.top + rect.height / 2, 22);
+  }
 
-  const countdown = {
-    intervalId: null,
-    remaining: 0,
+  // Win celebration: multicoloured confetti raining down the given container
+  // (the finish overlay). It falls only in the side gaps either side of the
+  // centred content — with drift biased outward — so the message stays clear.
+  function launchConfetti(container, count) {
+    const w = container.clientWidth || STAGE_W;
+    const h = container.clientHeight || STAGE_H;
+    count = count || 46;
+    const center = w / 2;
+    const inner = 150;                    // half-width of the clear content column
+    const bandW = 210;                    // confetti band width, hugging each side
 
-    get active() { return settings.timerSeconds > 0; },
-
-    render() {
-      el.hardTimerValue.textContent = this.remaining;
-      el.hardTimer.classList.toggle('critical', this.remaining <= 2);
-    },
-
-    stop() {
-      if (this.intervalId) {
-        clearInterval(this.intervalId);
-        this.intervalId = null;
-      }
-    },
-
-    // Restarted after every newly completed colour, so the clock is
-    // per-connection rather than for the whole round.
-    restart(onExpire) {
-      if (!this.active) return;
-      this.stop();
-      this.remaining = settings.timerSeconds;
-      this.render();
-      this.intervalId = setInterval(() => {
-        this.remaining--;
-        this.render();
-        if (this.remaining <= 0) {
-          this.stop();
-          sound.timeout();
-          onExpire();
-          return;
-        }
-        sound.tick();
-      }, 1000);
+    for (let i = 0; i < count; i++) {
+      const c = document.createElement('div');
+      c.className = 'confetti';
+      const size = 7 + Math.random() * 5;
+      const left = Math.random() < 0.5;
+      const t = Math.random() * bandW;    // band sits just outside the content
+      const x = left ? (center - inner - bandW + t) : (center + inner + t);
+      c.style.left = Math.round(Math.max(0, Math.min(w, x))) + 'px';
+      c.style.width = size.toFixed(1) + 'px';
+      c.style.height = (Math.random() < 0.4 ? size : size * 1.6).toFixed(1) + 'px';
+      if (Math.random() < 0.4) c.style.borderRadius = '50%';
+      // drift outward (away from the centre) so pieces never wander into the text
+      c.style.setProperty('--dx', (left ? Math.round(-30 - Math.random() * 60)
+                                        : Math.round(30 + Math.random() * 60)) + 'px');
+      c.style.setProperty('--fall', Math.round(h + 60) + 'px');
+      c.style.setProperty('--spin', Math.round(Math.random() * 800 - 400) + 'deg');
+      c.style.setProperty('--dur', (1.5 + Math.random() * 1.4).toFixed(2) + 's');
+      c.style.setProperty('--delay', (Math.random() * 0.6).toFixed(2) + 's');
+      c.style.background = CONFETTI[Math.floor(Math.random() * CONFETTI.length)];
+      container.appendChild(c);
+      c.addEventListener('animationend', () => c.remove());
     }
-  };
+  }
+
+  // The full finish flourish: a starburst out of the badge, a big opening
+  // burst, then a steady emitter that keeps the shower going for a good while.
+  // Pieces self-remove (~1.5-2.9s each), so a low, spaced-out spawn rate keeps
+  // the live node count small however long the shower runs.
+  let confettiTimer = null;
+  function celebrateWin() {
+    launchConfetti(el.overlay, 26);          // opening wave (down the sides)
+
+    const DURATION = 3200;                   // keep raining for ~3.2s
+    const EVERY = 400;                        // a small wave this often
+    const startedAt = Date.now();
+    clearInterval(confettiTimer);
+    confettiTimer = setInterval(() => {
+      // Stop when the shower's run its course, or the overlay was dismissed.
+      if (!el.overlay.classList.contains('show') || Date.now() - startedAt > DURATION) {
+        clearInterval(confettiTimer);
+        confettiTimer = null;
+        return;
+      }
+      launchConfetti(el.overlay, 10);
+    }, EVERY);
+  }
+
+  // Gentle elapsed-time indicator — whole seconds, no sound: a quiet hint that
+  // the run is timed, never a pressuring stopwatch.
+  let playClockTimer = null;
+  function tickPlayClock() {
+    const s = Math.floor((Date.now() - round.startedAt) / 1000);
+    el.playClockValue.textContent = s + 's';
+  }
+  function startPlayClock() {
+    stopPlayClock();
+    el.playClock.style.display = 'flex';
+    tickPlayClock();
+    playClockTimer = setInterval(tickPlayClock, 250);
+  }
+  function stopPlayClock() {
+    if (playClockTimer) { clearInterval(playClockTimer); playClockTimer = null; }
+  }
 
   /* =========================================================================
    * Scores
@@ -612,6 +634,40 @@
     splitSelected();
   });
 
+  // A soft lane behind the selected block's whole row and column, marking the
+  // directions it can slide. Shown instead of per-destination block outlines;
+  // both sit behind the swatches (added to the board before them each round).
+  const rowBandEl = document.createElement('div');
+  rowBandEl.className = 'move-band';
+  const colBandEl = document.createElement('div');
+  colBandEl.className = 'move-band';
+
+  function hideMoveBands() {
+    rowBandEl.style.display = 'none';
+    colBandEl.style.display = 'none';
+  }
+
+  function showMoveBand(node, isRow, indices) {
+    const size = round.cellSize;
+    const step = size + GRID_GAP;
+    const gridW = round.cols * size + GRID_GAP * (round.cols - 1);
+    const gridH = round.rows * size + GRID_GAP * (round.rows - 1);
+    const PAD = 4;
+    const lo = Math.min(...indices), hi = Math.max(...indices);
+    if (isRow) {
+      node.style.left = Math.round(round.originX - PAD) + 'px';
+      node.style.top = Math.round(round.originY + lo * step - PAD) + 'px';
+      node.style.width = Math.round(gridW + PAD * 2) + 'px';
+      node.style.height = Math.round((hi - lo) * step + size + PAD * 2) + 'px';
+    } else {
+      node.style.left = Math.round(round.originX + lo * step - PAD) + 'px';
+      node.style.top = Math.round(round.originY - PAD) + 'px';
+      node.style.width = Math.round((hi - lo) * step + size + PAD * 2) + 'px';
+      node.style.height = Math.round(gridH + PAD * 2) + 'px';
+    }
+    node.style.display = 'block';
+  }
+
   let seamNodes = [];
   let outlineNodes = [];
   let raisedNodes = [];
@@ -732,6 +788,7 @@
     round.selected = null;
     round.hinted.forEach(b => b.node.classList.remove('hint'));
     round.hinted = [];
+    hideMoveBands();
     hideSplitControls();
     hidePieceOutline();
     lowerPiece();
@@ -751,6 +808,10 @@
 
     const horizontal = rowBand(group);
     const vertical = columnBand(group);
+
+    // Light up the whole movable row / column rather than each destination.
+    if (horizontal.rows) showMoveBand(rowBandEl, true, horizontal.rows);
+    if (vertical.cols) showMoveBand(colBandEl, false, vertical.cols);
 
     round.blocks.forEach(b => {
       if (b === block) return;
@@ -986,7 +1047,6 @@
 
   function startRound(pairCount) {
     el.overlay.classList.remove('show');
-    el.failOverlay.classList.remove('show');
     clearSelection();
     el.board.innerHTML = '';
 
@@ -1037,15 +1097,15 @@
       round.grid.push(row);
     }
 
-    el.hardTimer.style.display = countdown.active ? 'flex' : 'none';
-
     layoutMetrics();
     positionAll();                     // styles set before insertion: no slide-in
+    el.board.appendChild(rowBandEl);   // behind the swatches: added before them
+    el.board.appendChild(colBandEl);
     round.blocks.forEach(b => el.board.appendChild(b.node));
     el.board.appendChild(splitBtn);    // board was wiped, put the button back
 
     round.startedAt = Date.now();
-    countdown.restart(failRound);
+    startPlayClock();
   }
 
   /** Every colour whose copies currently form one bonded piece. */
@@ -1075,21 +1135,17 @@
 
     const justDone = new Set(newlyDone);
     round.blocks.forEach(b => {
-      if (justDone.has(b.colorId)) burstParticles(b.node, b.particle);
+      if (justDone.has(b.colorId)) burstParticles(b.node);
     });
 
     sound.match();
-    if (done.size === round.totalColours) {
-      countdown.stop();
-      finishRound();
-    } else {
-      countdown.restart(failRound);
-    }
+    if (done.size === round.totalColours) finishRound();
   }
 
   function finishRound() {
     round.active = false;
     clearSelection();
+    stopPlayClock();
     const elapsed = (Date.now() - round.startedAt) / 1000;
     saveScore(elapsed);
     sound.finish();
@@ -1097,13 +1153,7 @@
     el.finalTime.textContent = elapsed.toFixed(2) + 's';
     renderScores();
     el.overlay.classList.add('show');
-  }
-
-  function failRound() {
-    round.active = false;
-    clearSelection();
-    el.failMatchedCount.textContent = round.done.size + ' of ' + round.totalColours + ' colours connected';
-    el.failOverlay.classList.add('show');
+    celebrateWin();
   }
 
   // A tap on empty board space drops the current selection.
@@ -1126,9 +1176,8 @@
     round.active = false;
     round.blocks = [];
     clearSelection();
-    countdown.stop();
+    stopPlayClock();
     el.overlay.classList.remove('show');
-    el.failOverlay.classList.remove('show');
     el.gameScreen.style.display = 'none';
     el.titleScreen.style.display = 'flex';
   }
@@ -1139,13 +1188,22 @@
     else showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
   });
 
-  // DEV BUTTON START (remove this block + the #devStartBtn element to strip dev mode)
-  if (el.devStartBtn) {
-    el.devStartBtn.addEventListener('click', () => showGame(DEV_PAIR_COUNT));
-  }
-  // DEV BUTTON END
-
   el.backBtn.addEventListener('click', showTitle);
-  el.failHomeBtn.addEventListener('click', showTitle);
+
+  // Rules screen: reachable from the title, returns home, or dives into a game.
+  function showRules() {
+    el.titleScreen.style.display = 'none';
+    el.rulesScreen.style.display = 'flex';
+    if (el.rulesInner) el.rulesInner.scrollTop = 0;
+  }
+  el.rulesLink.addEventListener('click', showRules);
+  el.rulesBackBtn.addEventListener('click', () => {
+    el.rulesScreen.style.display = 'none';
+    el.titleScreen.style.display = 'flex';
+  });
+  el.rulesStartBtn.addEventListener('click', () => {
+    el.rulesScreen.style.display = 'none';
+    showGame(BASE_PAIR_COUNT * (settings.longList ? LONG_LIST_MULTIPLIER : 1));
+  });
 
 }());
